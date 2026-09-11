@@ -27,7 +27,7 @@ const BasePath = "/api/v1"
 // to answer before removing anything: how old is the oldest client still
 // calling. Regenerating against an unchanged API leaves it alone — it is not
 // a build stamp.
-const Revision = "2026-09-04"
+const Revision = "2026-09-11"
 
 // RevisionHeader is where [Revision] is sent: the same header the server
 // generated from this document reads.
@@ -153,6 +153,8 @@ const (
 	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
 	// The client was built against an API revision this server no longer serves.
 	ErrorCodeUpgradeRequired ErrorCode = rigerr.CodeUpgradeRequired
+	// Something the server depends on did not answer in time. Retry.
+	ErrorCodeUnavailable ErrorCode = rigerr.CodeUnavailable
 	// Something went wrong on the server.
 	ErrorCodeInternal ErrorCode = rigerr.CodeInternal
 )

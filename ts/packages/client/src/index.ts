@@ -106,6 +106,7 @@ export {
     isRigError,
     isTooLarge,
     isUnauthorized,
+    isUnavailable,
     isUnsupportedMediaType,
     isUpgradeRequired,
 } from "./errors.js";

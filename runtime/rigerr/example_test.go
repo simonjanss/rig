@@ -1,6 +1,7 @@
 package rigerr_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 
@@ -64,4 +65,32 @@ func ExampleInternal() {
 	// Internal: load the todo list: dial tcp 10.0.0.4:5432: connect: connection refused
 	// Internal load the todo list
 	// true
+}
+
+// A caller that hung up is told apart from a server that broke, which the code
+// alone cannot do: there is deliberately no code for it, because an abandoned
+// request needs no status — it needs no response.
+func ExampleAborted() {
+	err := rigerr.Internal(context.Canceled, "listing todos")
+
+	fmt.Println(rigerr.Aborted(err), rigerr.TimedOut(err))
+	fmt.Println(rigerr.CodeOf(err))
+
+	// Output:
+	// true false
+	// Internal
+}
+
+// A timeout is the mirror image of a cancelled caller rather than a sibling of
+// it. Nobody hung up; something the server was waiting on did not answer, and
+// there is still a caller to tell.
+func ExampleTimedOut() {
+	err := fmt.Errorf("acquire a connection: %w", context.DeadlineExceeded)
+
+	fmt.Println(rigerr.TimedOut(err), rigerr.Aborted(err))
+	fmt.Println(rigerr.CodeOf(err), rigerr.StatusOf(err))
+
+	// Output:
+	// true false
+	// Unavailable 503
 }

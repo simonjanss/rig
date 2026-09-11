@@ -464,6 +464,19 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		Now:              h.Now,
 	}
 
+	// The server the two error writers below report through.
+	//
+	// One literal, shared, because it is the answer to "what does a request look
+	// like" and a second copy of it is a second answer: the one this replaced
+	// named no caller, no client revision, and a request identifier nothing
+	// validated.
+	//
+	// RequestIDHeader is on it because it is what decides which header is read,
+	// and a Server without it reads the default one — which is the right header
+	// in most projects and the wrong one in exactly the projects that said so in
+	// rig.yaml.
+	srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
+
 	// Providers are wired only when this process has credentials for at least one.
 	// A deployment that has none mounts no provider routes, which is better than
 	// mounting a button that cannot work.
@@ -521,6 +534,17 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 			AllowedReturnTo:   append([]string{"https://app.example.com", "https://beta.example.com"}, h.OAuth.ReturnTo...),
 			OnSignIn:          h.OAuth.OnSignIn,
 			OnError:           h.OAuth.OnError,
+			// And the same error writer every other route in this server uses, so a
+			// refused provider sign-in is classified, answered and logged the way a
+			// refused login is. These two routes used to write no line at any level: a
+			// failed sign-in existed in the authentication log and nowhere else.
+			//
+			// Behind Hooks.OAuth.OnError, and behind the front-end redirect below when
+			// there is one, because those answer what a person sees and this answers where
+			// the line goes.
+			Fail: func(w http.ResponseWriter, r *http.Request, err error) {
+				fail(srv, w, r, requestContext(srv, r), err)
+			},
 			// Where the front end is. It selects the ending that leaves the tokens in a
 			// cookie and redirects there, and the failure redirect that goes with it —
 			// one callback route on the front end, two outcomes.
@@ -544,13 +568,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	// cannot reach is the trace fallback, because these routes carry no span, so a
 	// request nobody named is named here instead of by its trace;
 	// [Hooks.RequestID] says what that costs.
-	//
-	// RequestIDHeader is on the literal because it is what decides which header is
-	// read, and a Server without it reads the default one — which is the right
-	// header in most projects and the wrong one in exactly the projects that said
-	// so in rig.yaml.
 	if cfg.OnError == nil {
-		srv := Server{Logger: h.Logger, RequestID: h.RequestID, RequestIDHeader: RequestIDHeader}
 		cfg.OnError = func(w http.ResponseWriter, r *http.Request, err error) {
 			fail(srv, w, r, requestContext(srv, r), err)
 		}

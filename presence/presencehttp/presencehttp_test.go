@@ -226,12 +226,18 @@ func TestTheAnswerCarriesTheIntervals(t *testing.T) {
 	}
 }
 
-// A body over the limit is refused rather than read.
+// A body over the limit is refused rather than read, and says so.
 //
 // Until these routes used [httpx.Decode] there was no limit here at all — the
 // only route in rig that would read an unbounded request body. Authenticated, so
 // never an anonymous hole, but a signed-in client streaming forever into a
 // heartbeat is not a threat model worth keeping.
+//
+// It answered 400 for as long as the limit was an [io.LimitReader]: the body was
+// truncated rather than refused, so what the decoder saw was a document that
+// stopped in the middle and what the caller was told was that its request was
+// malformed. It was not — it was too big, which is the one thing a client can
+// actually act on.
 func TestABodyOverTheLimitIsRefused(t *testing.T) {
 	t.Parallel()
 
@@ -240,8 +246,8 @@ func TestABodyOverTheLimitIsRefused(t *testing.T) {
 	huge := `{"sessionKey":"` + strings.Repeat("x", 1<<17) + `","scope":"board"}`
 
 	rec := beat(t, someone(), huge)
-	if rec.Code != http.StatusBadRequest {
-		t.Errorf("a body of %d bytes answered %d, want 400", len(huge), rec.Code)
+	if rec.Code != http.StatusRequestEntityTooLarge {
+		t.Errorf("a body of %d bytes answered %d, want 413", len(huge), rec.Code)
 	}
 }
 

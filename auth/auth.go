@@ -388,8 +388,21 @@ type OAuth struct {
 	// — cancelled at the consent screen, an expired state cookie, an address the
 	// provider has not verified — so an application can redirect to its own
 	// sign-in page carrying a code it has copy for, rather than infer one from a
-	// status. Nil keeps the default.
+	// status. Nil falls through to [OAuth.Fail], and then to the default.
 	OnError func(w http.ResponseWriter, r *http.Request, f *oauth.Failure)
+
+	// Fail is the API's own error writer, used when [OAuth.OnError] is nil and
+	// no front end has been configured to redirect to.
+	//
+	// It is what gets a refused provider sign-in into the log. The two callback
+	// routes were the only ones rig serves that wrote no line at any level, so a
+	// failure existed in the authentication log and nowhere else; handing them
+	// the same writer every other route has closes that. A generated server sets
+	// it for you.
+	//
+	// It does not change what a browser sees when a front end is configured: a
+	// `web:` block installs a redirect into [OAuth.OnError], and that still wins.
+	Fail func(w http.ResponseWriter, r *http.Request, err error)
 }
 
 // MailOptions is the mail queue's configuration.
@@ -739,6 +752,11 @@ func New(cfg Config) (*Auth, error) {
 			// And a provider sign-in that does not is the one failure in this
 			// package a browser sees as a document rather than as a body.
 			OnError: onError,
+
+			// Behind OnError, and behind the front-end redirect installed into it
+			// above, so the two questions stay separate: what a person sees, and
+			// where the line about it goes.
+			Fail: cfg.OAuth.Fail,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("auth: oauth: %w", err)

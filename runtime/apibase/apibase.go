@@ -23,6 +23,7 @@ package apibase
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"log/slog"
 	"net/http"
@@ -79,6 +80,10 @@ type Tracer interface {
 
 	// Fail records why a request is being refused, on whatever span the context
 	// is in. It ends nothing: the span belongs to the handler.
+	//
+	// Not called at all when the caller went away. Nothing failed, so there is
+	// nothing to put on the span — see [LogFailure], which is the only thing that
+	// calls this.
 	Fail(ctx context.Context, status int, err error)
 }
 
@@ -426,6 +431,22 @@ type Server struct {
 	// which is the right behavior for almost everyone.
 	OnError func(w http.ResponseWriter, r *http.Request, rc RequestContext, err error)
 
+	// LogLevel chooses the level a failure is written at. Nil is [LevelFor],
+	// which is rig's own table and what almost every project wants.
+	//
+	// It is the only field here that changes what the log says rather than what
+	// the client gets, and it is deliberately narrow. It cannot turn a line off:
+	// the lowest level it can return is still a level, and the one line that says
+	// why a 500 happened is the reason this package writes anything at all. What
+	// it is for is a project that knows something rig cannot — that a particular
+	// route should never 404, so a 404 there is worth a warning, or that its
+	// public API takes enough hand-written requests that a 400 is noise.
+	//
+	// It is asked about the code, not the error, so it cannot see the two rows of
+	// the table that have no code. A request whose caller went away is debug and a
+	// timeout is [rigerr.CodeUnavailable] before this is consulted.
+	LogLevel func(code rigerr.Code) slog.Level
+
 	// PreHooks run before anything else, in order. A hook that writes a response
 	// stops the request.
 	PreHooks []func(w http.ResponseWriter, r *http.Request) bool
@@ -676,6 +697,20 @@ func Fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, e
 	// was.
 	LogFailure(s, r, rc, err)
 
+	// Nothing is answered when the caller has gone, and this is the copy of that
+	// rule that matters: every generated route, every project's own mapper and
+	// the closures the generator writes for the inbox, presence and the
+	// authentication routes all pass through this one function. The generated
+	// DefaultErrorMapper reaches [httpx.AnswerFor] directly rather than through
+	// [httpx.WriteError], so the guard in there does not cover it — and a project
+	// picks this one up by upgrading runtime rather than by regenerating.
+	//
+	// After the line above rather than before it: the request is still worth a
+	// record, at debug, saying it was abandoned.
+	if rigerr.Aborted(err) {
+		return
+	}
+
 	if s.OnError != nil {
 		s.OnError(w, r, rc, err)
 		return
@@ -693,33 +728,110 @@ func Fail(s Server, w http.ResponseWriter, r *http.Request, rc RequestContext, e
 // and comes out here, and that pair is the whole mechanism for answering "what
 // happened to my request".
 //
-// Two levels, because they are two different events. An internal failure is
-// the server's fault and is an error. A 404, a 422, a refused permission —
-// the server worked, and logging those at anything but debug is how a log
-// becomes a thing nobody reads.
+// The level is chosen from the error, because these are not all the same event.
+// [LevelFor] is the table and the argument for it. The message splits with it,
+// so the four cases are greppable without anybody having to filter on a level.
 func LogFailure(s Server, r *http.Request, rc RequestContext, err error) {
 	code := rigerr.CodeOf(err)
+	abandoned := rigerr.Aborted(err)
+
 	// On the span the handler opened, which this does not end: the span belongs to
-	// the handler and is closed by its defer. Only an internal failure makes the
-	// span itself red — the same distinction the two log levels below draw, and
-	// for the same reason. Nil when this project does not trace, and then there is
-	// no span to redden.
-	if s.Tracer != nil {
+	// the handler and is closed by its defer. Nil when this project does not
+	// trace, and then there is no span to redden.
+	//
+	// Skipped entirely for an abandoned request. Nothing failed, so there is no
+	// failure to record — which is what observe's own repository-layer path
+	// already decided for a cancelled call, and this is the same fact arriving by
+	// the other road.
+	if s.Tracer != nil && !abandoned {
 		s.Tracer.Fail(r.Context(), code.HTTPStatus(), err)
 	}
 
-	attrs := []any{
-		slog.Any(requestAttr, rc),
-		slog.Int("status", code.HTTPStatus()),
-		slog.Any("code", code),
-		slog.Any("error", err),
+	level, msg := slog.LevelDebug, "request abandoned"
+	if !abandoned {
+		level, msg = s.levelFor(code), messageFor(code)
 	}
 
-	if code == rigerr.CodeInternal {
-		s.logger().ErrorContext(r.Context(), "request failed", attrs...)
+	l := s.logger()
+	// Asked before the attributes are built, the way the request line asks. It
+	// matters more here than it used to: an abandoned request is debug and there
+	// can be one per closed tab.
+	if !l.Enabled(r.Context(), level) {
 		return
 	}
-	s.logger().DebugContext(r.Context(), "request refused", attrs...)
+
+	attrs := []any{slog.Any(requestAttr, rc)}
+	// Absent rather than zero on an abandoned request. A status and a code are
+	// facts about an answer, and there is no answer — printing the 500 it would
+	// have been is the misfiling this function exists to stop.
+	if !abandoned {
+		attrs = append(attrs, slog.Int("status", code.HTTPStatus()), slog.Any("code", code))
+	}
+	attrs = append(attrs, slog.Any("error", err))
+
+	l.Log(r.Context(), level, msg, attrs...)
+}
+
+// LevelFor is the level rig writes a failure at, given the code it carries.
+//
+// Exported so that a project writing its own OnError can match rig rather than
+// guess at it, and so that [Server.LogLevel] has something to fall back to and
+// to defer to for the codes it does not care about.
+//
+// The split is by whether anybody can act on the line, not by status class:
+//
+//   - A refusal the server meant — 401, 403, 404, 409, 422, 426, 429 — is debug.
+//     The server did its job. These are the ones rig produces structurally, one
+//     per expired session and one per page load before sign-in, and a warning
+//     stream made of them is one people learn to skim.
+//   - A caller that was built wrong — 400, 413, 415 — is a warning. Nobody is at
+//     a keyboard causing these: they are a client that shipped broken, they are
+//     rare, and each one is somebody's deploy.
+//   - 503 is a warning. Something the server waited on did not answer, which is
+//     latency or capacity rather than a broken path.
+//   - 500 is an error, and anything this function has never heard of is levelled
+//     by its status, so a project's own Coder lands where the answer it produces
+//     says it should.
+func LevelFor(code rigerr.Code) slog.Level {
+	switch code {
+	case rigerr.CodeBadRequest, rigerr.CodeTooLarge, rigerr.CodeUnsupportedMediaType,
+		rigerr.CodeUnavailable:
+		return slog.LevelWarn
+	case rigerr.CodeInternal:
+		return slog.LevelError
+	}
+	if code.HTTPStatus() >= http.StatusInternalServerError {
+		return slog.LevelError
+	}
+	return slog.LevelDebug
+}
+
+// levelFor is [LevelFor] unless this server replaced it.
+func (s Server) levelFor(code rigerr.Code) slog.Level {
+	if s.LogLevel != nil {
+		return s.LogLevel(code)
+	}
+	return LevelFor(code)
+}
+
+// messageFor is the sentence a failure is written under.
+//
+// Three rather than one so that the cases can be found without filtering on a
+// level, which is what a project that raised or lowered one would have to do. A
+// refusal and a caller that was built wrong share a sentence because the server
+// did the same thing in both — the level is what says whether anybody should
+// care.
+func messageFor(code rigerr.Code) string {
+	switch code {
+	case rigerr.CodeUnavailable:
+		return "request timed out"
+	case rigerr.CodeInternal:
+		return "request failed"
+	}
+	if code.HTTPStatus() >= http.StatusInternalServerError {
+		return "request failed"
+	}
+	return "request refused"
 }
 
 // LogRequest writes the request line, once every handler has finished.
@@ -811,11 +923,17 @@ func DecodeBody(r *http.Request, into any) error {
 // JSON create have to refuse the same keys and produce the same field errors,
 // and two decoders would eventually differ about one of them.
 func DecodeReader(r io.Reader, into any) error {
-	dec := json.NewDecoder(io.LimitReader(r, MaxBodyBytes))
+	dec := json.NewDecoder(httpx.Bounded(r, MaxBodyBytes))
 	dec.DisallowUnknownFields()
 
 	if err := dec.Decode(into); err != nil {
-		if err == io.EOF {
+		// Before the two below, because a truncated body looks exactly like a
+		// malformed one and used to be reported as one. [httpx.Bounded] is what
+		// tells them apart.
+		if errors.Is(err, httpx.ErrTooLarge) {
+			return rigerr.TooLarge("the request body is larger than the %d bytes this endpoint accepts", int64(MaxBodyBytes))
+		}
+		if errors.Is(err, io.EOF) {
 			return rigerr.BadRequest("the request body is empty")
 		}
 		return rigerr.BadRequest("cannot read the request body: %v", err)

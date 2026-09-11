@@ -133,6 +133,8 @@ const (
 	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
 	// The client was built against an API revision this server no longer serves.
 	ErrorCodeUpgradeRequired ErrorCode = rigerr.CodeUpgradeRequired
+	// Something the server depends on did not answer in time. Retry.
+	ErrorCodeUnavailable ErrorCode = rigerr.CodeUnavailable
 	// Something went wrong on the server.
 	ErrorCodeInternal ErrorCode = rigerr.CodeInternal
 )

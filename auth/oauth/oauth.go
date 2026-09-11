@@ -222,8 +222,29 @@ type Config struct {
 	// either way and before this is called, so a hook cannot lose the record
 	// that a sign-in was attempted and refused.
 	//
-	// Nil writes the failure as text/plain with the status the error carries.
+	// Nil falls through to [Config.Fail], and then to text/plain with the status
+	// the error carries.
 	OnError func(w http.ResponseWriter, r *http.Request, f *Failure)
+
+	// Fail is the API's own error writer, used when [Config.OnError] is nil.
+	//
+	// It is the shape every other route rig mounts takes for this —
+	// notifyhttp.Options.Fail, presencehttp.Options.Fail, authhttp.Config.OnError
+	// — which is the point of it: a generated server hands all four the same
+	// closure, so a refused provider sign-in is classified, answered and *logged*
+	// exactly as a refused login is. Without it these two routes were the only
+	// ones rig serves that wrote no line at any level; a failed provider sign-in
+	// existed in the authentication log and nowhere else.
+	//
+	// It takes an error rather than a [*Failure] because that is what an error
+	// writer takes. A Failure is an error and unwraps to what it carries, so
+	// nothing is lost passing one in.
+	//
+	// Second rather than first because [Config.OnError] answers a different
+	// question — what a *browser* mid-navigation should be shown — and a project
+	// that answered it meant it. An application serving a front end has one
+	// installed for it, so in practice this is what a headless deployment gets.
+	Fail func(w http.ResponseWriter, r *http.Request, err error)
 
 	// AllowedReturnTo are the origins a sign-in may redirect to when it
 	// finishes. A path on this origin is always allowed; anything else has to
@@ -659,19 +680,39 @@ func (h *Handler) fail(w http.ResponseWriter, r *http.Request, f *Failure) {
 		h.cfg.OnError(w, r, f)
 		return
 	}
-
-	code := rigerr.CodeOf(f)
-	message := f.Error()
-
-	var typed *rigerr.Error
-	if errors.As(f.Err, &typed) {
-		message = typed.Message
-	}
-	if code == rigerr.CodeInternal {
-		message = "something went wrong"
+	if h.cfg.Fail != nil {
+		h.cfg.Fail(w, r, f)
+		return
 	}
 
-	http.Error(w, message, code.HTTPStatus())
+	// Nobody to answer. The guard is here rather than in front of the two hooks
+	// above on purpose: they are what writes the log line, and a request that was
+	// abandoned is still worth one. This is only in front of rig's own write.
+	if rigerr.Aborted(f) {
+		return
+	}
+
+	// The classification is [rigerr.AnswerFor]'s, which is what the generated
+	// mapper and every other mounted route reach too — httpx.AnswerFor is this
+	// plus a Retry-After header, and a provider callback never carries one. It
+	// used to be a third hand-written copy of it, and a hand-written copy of this
+	// exact mapper has already drifted once: authhttp's dropped the per-field
+	// detail for long enough that a client could not highlight the field somebody
+	// got wrong.
+	//
+	// Through rigerr rather than httpx so that this package keeps the dependencies
+	// of an OAuth handler. httpx reaches runtime/throttle for that one header, and
+	// through it the Postgres driver — which an application that mounts these two
+	// routes and nothing else should not be linking.
+	//
+	// The envelope is still text/plain, which is the part that is not shared and
+	// should not be: these two routes are the only ones rig serves that a person
+	// reaches with their address bar, and a browser mid-navigation renders what
+	// comes back as a document. A JSON envelope is a worse dead end than a
+	// sentence. An application with a front end sends a redirect instead, through
+	// [Config.OnError].
+	answer := rigerr.AnswerFor(f)
+	http.Error(w, answer.Message, answer.Status)
 }
 
 func (h *Handler) write(ctx context.Context, e authlog.Entry) {

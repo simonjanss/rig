@@ -77,9 +77,80 @@ otherwise — the order and what it costs are in *Correlating a log line with a
 trace* below. `RequestID` is a field for answering the question differently, not
 for turning the answer on.
 
-**Anything that is not a 500 is `DEBUG`, not `ERROR`.** A 404, a 422, a refused
-permission: the server did its job. A log that reports those as errors is a log
-people learn to skim.
+**The level says whether anybody can act on the line.** Not the status class —
+the two do not agree, and sorting by status is what makes a log people learn to
+skim.
+
+| | Level | The line says |
+|---|---|---|
+| `Unauthorized`, `Forbidden`, `NotFound`, `Conflict`, `UnprocessableEntity`, `RateLimited`, `UpgradeRequired` | `DEBUG` | `request refused` |
+| `BadRequest`, `TooLarge`, `UnsupportedMediaType` | `WARN` | `request refused` |
+| The caller hung up | `DEBUG` | `request abandoned` |
+| `Unavailable` | `WARN` | `request timed out` |
+| `Internal` | `ERROR` | `request failed` |
+
+The first row is the half worth defending, because it is the half that stays.
+A 404, a 422, a refused permission: the server did its job. rig produces those
+structurally — one `Unauthorized` per expired session and one per page load
+before somebody signs in, a `NotFound` for every row that belongs to another
+tenant, a `Forbidden` before a body is even decoded — so a warning stream made
+of them is one nobody reads twice.
+
+The second row is the narrow case that is worth a warning. A client that sends
+an unknown field, a body over the limit, or the wrong content type is a client
+that shipped broken: nobody is at a keyboard causing these, they are rare, and
+each one is somebody's deploy.
+
+**A caller that went away is the quietest thing here, and a timeout is one of
+the loudest.** They look alike and are opposites. Nothing in rig cancels a
+request context — there is no `BaseContext`, and shutdown waits for the requests
+in flight rather than cancelling them — so a cancelled request is a closed
+browser tab, and there is nobody left to answer:
+
+> An abandoned request gets no response body, no status, and no red span. Just
+> the one debug line saying it happened.
+
+Nothing puts a deadline on a request context either. The `ReadTimeout` and
+`WriteTimeout` in `serve.Config` are connection deadlines and surface as write
+errors. So a timeout that reaches the log came from something *below* the
+handler — a pool acquire, an upstream call, your own `context.WithTimeout`
+around a query. Nobody hung up; something did not answer, which is latency or
+capacity rather than a broken path. It answers `503`, so a client knows to
+retry.
+
+Here is the warning a client that shipped broken leaves:
+
+```json
+{"level":"WARN","msg":"request refused",
+ "request":{"request_id":"req-91","method":"POST","route":"POST /api/v1/todos",
+            "path":"/api/v1/todos","remote_addr":"10.1.0.9:41028","user_agent":"todo-ios/3.1.0"},
+ "status":400,"code":"BadRequest",
+ "error":"BadRequest: the request body is not the shape this route takes: json: unknown field \"accountId\""}
+```
+
+**Reading it back.** `apibase.LevelFor` is the table above, exported, so a
+project writing its own `OnError` matches rig rather than guessing. And
+`rigerr.Aborted` and `rigerr.TimedOut` are the two predicates the rows without a
+code are chosen by, so your own code can ask exactly what rig asks.
+
+**Disagreeing with it.** `api.Server.LogLevel` takes a code and returns a level,
+and answers the one thing rig cannot know — that a particular route should never
+404, or that your public API takes enough hand-written requests that a 400 is
+noise rather than a deploy:
+
+```go
+api.Server{
+    LogLevel: func(code rigerr.Code) slog.Level {
+        if code == rigerr.CodeNotFound {
+            return slog.LevelWarn
+        }
+        return apibase.LevelFor(code)
+    },
+}
+```
+
+It is a level, not a switch. The lowest one it can return is still a level, and
+the line that says why a 500 happened is written either way.
 
 ## The request line
 
@@ -94,6 +165,13 @@ At `DEBUG`, one line per request, after the handler has finished:
 `route` is the pattern that matched, not the path that was requested — you get
 `GET /api/v1/todos/{id}` rather than one distinct value per identifier anybody
 has ever fetched. That is what makes it usable as a label.
+
+`status` is what was written, which for an abandoned request is nothing — so it
+reads `0`. Zero is a distinct outcome from `200` rather than the same one
+spelled differently: net/http still puts its implicit 200 on a socket nobody is
+reading, but no handler called `WriteHeader`, so nothing here saw a status to
+report. The line above it, `request abandoned`, is the one that says what
+actually happened; this one only ever reports the answer, and there was none.
 
 It is debug because it is one line per request forever. Turn it on when you are
 looking at something:

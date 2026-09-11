@@ -3,7 +3,7 @@
   "info": {
     "title": "todo",
     "description": "The todo HTTP API.\n\nThe notification inbox endpoints are served by a hand-written module and are not described here.",
-    "version": "2026-08-31"
+    "version": "2026-09-11"
   },
   "servers": [
     {
@@ -2589,6 +2589,7 @@
           "TooLarge",
           "UnsupportedMediaType",
           "UpgradeRequired",
+          "Unavailable",
           "Internal"
         ],
         "description": "Machine-readable reason a request failed.",
@@ -2603,6 +2604,7 @@
           "TooLarge",
           "UnsupportedMediaType",
           "UpgradeRequired",
+          "Unavailable",
           "Internal"
         ]
       },

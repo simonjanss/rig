@@ -1,7 +1,9 @@
 package notifyhttp_test
 
 import (
+	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"reflect"
@@ -244,5 +246,28 @@ func TestTheWireNamesAreCamelCase(t *testing.T) {
 			t.Errorf("%s.%s is %q on the wire; these routes answer camelCase",
 				typ.Name(), f.Name, name)
 		}
+	}
+}
+
+// An abandoned request is answered with nothing on the inbox routes too.
+//
+// These routes reach the rule by two different roads and it is worth pinning
+// both. This package's own fallback is httpx.Fail, which carries the guard
+// itself. A generated project supplies Fail instead, and that closure calls
+// apibase.Fail — which guards before it reaches the mapper at all, so the
+// project's own error writer is never asked to answer a request nobody is
+// waiting for.
+func TestAnAbandonedRequestIsAnsweredWithNothing(t *testing.T) {
+	t.Parallel()
+
+	rec := httptest.NewRecorder()
+	httpx.Fail(rec, httptest.NewRequest(http.MethodDelete, "/notifications/x", nil),
+		fmt.Errorf("dismissing: %w", context.Canceled))
+
+	if rec.Body.Len() != 0 {
+		t.Errorf("wrote %q into a socket nobody is reading", rec.Body.String())
+	}
+	if rec.Code != http.StatusOK {
+		t.Errorf("wrote status %d, want to have written none", rec.Code)
 	}
 }

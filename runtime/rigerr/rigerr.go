@@ -6,6 +6,7 @@
 package rigerr
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -44,7 +45,18 @@ const (
 	// a client can actually do something about, and "regenerate your client" is
 	// not advice anybody can take from a 400 that also means a malformed body.
 	CodeUpgradeRequired Code = "UpgradeRequired"
-	CodeInternal        Code = "Internal"
+	// CodeUnavailable reports that something the server was waiting on did not
+	// answer in time.
+	//
+	// It is separate from an internal failure because nothing here is broken: the
+	// path works and was too slow, which is the difference between a caller that
+	// should retry and one that should not. A 500 tells it neither. It is what a
+	// [context.DeadlineExceeded] becomes, and nothing in rig's own request path
+	// sets a deadline on a request context — so one arriving here was set below
+	// the handler, by a pool acquire, an upstream client, or the application's own
+	// timeout around a query.
+	CodeUnavailable Code = "Unavailable"
+	CodeInternal    Code = "Internal"
 )
 
 // HTTPStatus maps a code to its status.
@@ -70,6 +82,8 @@ func (c Code) HTTPStatus() int {
 		return http.StatusUnsupportedMediaType
 	case CodeUpgradeRequired:
 		return http.StatusUpgradeRequired
+	case CodeUnavailable:
+		return http.StatusServiceUnavailable
 	default:
 		return http.StatusInternalServerError
 	}
@@ -141,6 +155,12 @@ func UnsupportedMediaType(format string, args ...any) *Error {
 // UpgradeRequired reports that the caller is older than the server will serve.
 func UpgradeRequired(format string, args ...any) *Error {
 	return newf(CodeUpgradeRequired, format, args...)
+}
+
+// Unavailable reports that something the server depends on did not answer in
+// time, keeping the cause for the logs.
+func Unavailable(err error, format string, args ...any) *Error {
+	return &Error{Code: CodeUnavailable, Message: fmt.Sprintf(format, args...), Err: err}
 }
 
 // Internal reports a server-side failure, keeping the cause for the logs.
@@ -302,7 +322,96 @@ func CodeOf(err error) Code {
 	if errors.As(err, &c) {
 		return c.ErrorCode()
 	}
+
+	// Last, so that a code somebody stated explicitly still wins over the cause
+	// it happens to carry: a handler that wraps a timed-out query in a NotFound
+	// meant NotFound.
+	if TimedOut(err) {
+		return CodeUnavailable
+	}
 	return CodeInternal
+}
+
+// Aborted reports whether err is a caller that went away.
+//
+// Nothing in rig ever cancels a request context. There is no BaseContext on the
+// server it builds, and shutdown waits for the requests in flight rather than
+// cancelling them — so a [context.Canceled] arriving at a handler boundary is
+// the caller hanging up, and nothing else. A closed browser tab, not a failure.
+//
+// It deliberately has no [Code]. A status would have to be a non-standard one,
+// which would reach the generated OpenAPI document and every client's Is
+// helpers, and an abandoned request does not need a status: it needs no
+// response, because there is nobody left to read one.
+//
+// The assumption it rests on is rig's, not Go's. A handler that cancels a
+// context of its own and returns that error is telling this function the caller
+// left when it did not, and would have its answer dropped.
+func Aborted(err error) bool { return errors.Is(err, context.Canceled) }
+
+// TimedOut reports whether err is something the server waited on that did not
+// answer.
+//
+// The mirror image of [Aborted] rather than a sibling of it, and the reason the
+// two are not one predicate. Nothing in rig's request path puts a deadline on a
+// request context either — the read and write timeouts on the server are
+// connection deadlines and surface as write errors — so a
+// [context.DeadlineExceeded] here was set below the handler by something the
+// server was waiting on. Nobody hung up; something did not answer.
+//
+// Unlike [Aborted] this does carry a [Code]: [CodeUnavailable], through
+// [CodeOf]. There is a caller waiting for an answer, and 503 is a more useful
+// one than 500 to a client deciding whether to retry.
+func TimedOut(err error) bool { return errors.Is(err, context.DeadlineExceeded) }
+
+// Answer is what an error means on the wire, before anything is encoded.
+//
+// Separate from any envelope so that callers with different ones — the generated
+// server, whose field names go through `api.json_case`, httpx's JSON envelope,
+// and the text/plain page a provider callback answers with — can share the
+// decision without sharing the shape. That is the whole seam between the two:
+// the classification is one implementation, the encoding is several.
+type Answer struct {
+	// Code and Status are the same fact twice, because a caller assembling a
+	// response wants both and deriving one from the other at four call sites is
+	// how they drift.
+	Code   Code
+	Status int
+	// Message is already redacted.
+	Message string
+	// Fields is nil unless the failure carried per-field detail.
+	Fields any
+}
+
+// AnswerFor classifies err: the code it carries, the status that code is
+// answered with, the message a client may be shown, and the per-field detail if
+// there is any.
+//
+// The one thing a caller must not have to remember: **an internal failure's
+// detail never reaches the client**. It is exactly the kind of thing that leaks
+// a table name, a constraint, or a connection string, so the message becomes a
+// fixed sentence and the request id becomes the only way to find out more.
+//
+// It is here rather than beside the HTTP envelope because it needs nothing from
+// net/http, and a package that only wants to classify an error should not have
+// to take a dependency on everything answering one implies. httpx.AnswerFor is
+// this plus the one header a 429 has to leave with, and is what a route that has
+// a ResponseWriter in hand should call.
+func AnswerFor(err error) Answer {
+	code := CodeOf(err)
+
+	message := err.Error()
+	var typed *Error
+	if errors.As(err, &typed) {
+		message = typed.Message
+	}
+	if code == CodeInternal {
+		message = "something went wrong"
+	}
+
+	fields, _ := FieldsOf(err)
+
+	return Answer{Code: code, Status: code.HTTPStatus(), Message: message, Fields: fields}
 }
 
 // FieldsOf returns the per-field detail an error carries, if it carries any.

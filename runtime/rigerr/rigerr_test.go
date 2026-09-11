@@ -1,6 +1,7 @@
 package rigerr_test
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"net/http"
@@ -198,5 +199,105 @@ func TestALooseFieldErrorIsInternal(t *testing.T) {
 	// That is what the generated input errors do, and they say so themselves.
 	if got := rigerr.CodeOf(selfCoded{}); got != rigerr.CodeUnprocessableEntity {
 		t.Errorf("an input error should still be 422, got %q", got)
+	}
+}
+
+// The two context errors survive whatever a service wrapped them in on the way
+// out, which is the only reason a predicate over errors.Is is enough. A pool
+// acquire that timed out is several layers below the handler that reports it.
+func TestTheContextErrorsSurviveWrapping(t *testing.T) {
+	t.Parallel()
+
+	abandoned := rigerr.Internal(context.Canceled, "listing todos")
+	if !rigerr.Aborted(abandoned) {
+		t.Error("a cancelled cause should be Aborted however it was wrapped")
+	}
+	if rigerr.TimedOut(abandoned) {
+		t.Error("a cancelled caller did not time out")
+	}
+
+	slow := fmt.Errorf("acquire a connection: %w", context.DeadlineExceeded)
+	if !rigerr.TimedOut(slow) {
+		t.Error("a deadline should be TimedOut however it was wrapped")
+	}
+	if rigerr.Aborted(slow) {
+		t.Error("a timeout is not a caller leaving")
+	}
+}
+
+// A timeout is 503 rather than 500, because there is a caller waiting and
+// "retry" is a more useful answer to it than "something went wrong".
+func TestATimeoutIsUnavailable(t *testing.T) {
+	t.Parallel()
+
+	slow := fmt.Errorf("query todos: %w", context.DeadlineExceeded)
+
+	if got := rigerr.CodeOf(slow); got != rigerr.CodeUnavailable {
+		t.Errorf("CodeOf = %q, want Unavailable", got)
+	}
+	if got := rigerr.StatusOf(slow); got != http.StatusServiceUnavailable {
+		t.Errorf("StatusOf = %d, want 503", got)
+	}
+}
+
+// A code somebody stated explicitly wins over the cause it happens to carry.
+// A handler that answers NotFound for a lookup that timed out meant NotFound,
+// and the caller is not helped by being told to retry something it cannot.
+func TestAStatedCodeWinsOverATimedOutCause(t *testing.T) {
+	t.Parallel()
+
+	stated := rigerr.NotFound("no todo with that id").Wrap(context.DeadlineExceeded)
+
+	if got := rigerr.CodeOf(stated); got != rigerr.CodeNotFound {
+		t.Errorf("CodeOf = %q, want NotFound", got)
+	}
+	// The predicate still answers for what it is asked, so a caller that wants
+	// to know there was a timeout underneath can still find out.
+	if !rigerr.TimedOut(stated) {
+		t.Error("TimedOut reports the cause, whatever code was stated over it")
+	}
+}
+
+// An abandoned request deliberately gets no code of its own. A 499 would reach
+// the generated OpenAPI document and every client's Is helpers, and there is
+// nobody left to read a status anyway.
+func TestAnAbandonedRequestHasNoCodeOfItsOwn(t *testing.T) {
+	t.Parallel()
+
+	gone := fmt.Errorf("listing todos: %w", context.Canceled)
+
+	if got := rigerr.CodeOf(gone); got != rigerr.CodeInternal {
+		t.Errorf("CodeOf = %q, want Internal — Aborted is what tells them apart", got)
+	}
+	if !rigerr.Aborted(gone) {
+		t.Error("Aborted is the predicate that carries this, not a code")
+	}
+}
+
+// The classification lives here rather than beside the HTTP envelope, so that a
+// package answering something other than JSON — auth/oauth, which answers the
+// text/plain page a browser mid-navigation renders — can share it without
+// taking on what answering an HTTP request implies.
+//
+// The redaction is the part that must not be re-implemented: an internal
+// message names the table, the constraint or the connection string that failed.
+func TestAnswerForRedactsAnInternalFailure(t *testing.T) {
+	t.Parallel()
+
+	internal := rigerr.Internal(errors.New(`relation "todos" does not exist`), "listing todos")
+	got := rigerr.AnswerFor(internal)
+
+	if got.Message != "something went wrong" {
+		t.Errorf("message = %q; an internal failure's detail must not reach a client", got.Message)
+	}
+	if got.Code != rigerr.CodeInternal || got.Status != http.StatusInternalServerError {
+		t.Errorf("code/status = %q/%d, want Internal/500", got.Code, got.Status)
+	}
+
+	// Everything else keeps the sentence the handler wrote, which is the whole
+	// point of writing one.
+	refused := rigerr.NotFound("no todo with id %d", 7)
+	if got := rigerr.AnswerFor(refused); got.Message != "no todo with id 7" {
+		t.Errorf("message = %q, want the handler's", got.Message)
 	}
 }

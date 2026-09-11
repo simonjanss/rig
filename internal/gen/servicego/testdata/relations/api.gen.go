@@ -83,6 +83,7 @@ const (
 	ErrorCodeTooLarge             ErrorCode = rigerr.CodeTooLarge
 	ErrorCodeUnsupportedMediaType ErrorCode = rigerr.CodeUnsupportedMediaType
 	ErrorCodeUpgradeRequired      ErrorCode = rigerr.CodeUpgradeRequired
+	ErrorCodeUnavailable          ErrorCode = rigerr.CodeUnavailable
 	ErrorCodeInternal             ErrorCode = rigerr.CodeInternal
 )
 

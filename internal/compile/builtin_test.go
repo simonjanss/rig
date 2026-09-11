@@ -49,6 +49,7 @@ func TestErrorCodesCoverRigerr(t *testing.T) {
 		rigerr.CodeTooLarge,
 		rigerr.CodeUnsupportedMediaType,
 		rigerr.CodeUpgradeRequired,
+		rigerr.CodeUnavailable,
 		rigerr.CodeInternal,
 	}
 

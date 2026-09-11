@@ -805,6 +805,23 @@ your API answers failures in, and it answers them in JSON — which is no more
 readable in an address bar than the plain page it would replace. Two questions,
 two fields.
 
+**A refused sign-in is in your log as well as your audit table.** It used not to
+be: these two routes were the only ones rig serves that wrote no line at any
+level, so a failed provider sign-in existed in `authlog` and nowhere else. A
+generated server hands them the same error writer every other route reports
+through, so the line reads like every other failure and carries the same request
+id.
+
+That writer is `auth.OAuth.Fail`, and it is behind both of the fields above:
+`OnError` wins, and the front-end redirect a `web:` block installs wins with it.
+It answers when neither is there, which is a headless deployment — where the
+`text/plain` page becomes your API's own envelope, since nobody is reading it
+with their eyes.
+
+`auth/oauth` used on its own, without a generated server, still answers
+`text/plain` and still writes nothing. Set `oauth.Config.Fail` to your own error
+writer to change that.
+
 ### Acting as somebody else
 
 ```

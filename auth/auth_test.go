@@ -524,3 +524,88 @@ func TestTheWebOriginIsAnAllowedReturnTo(t *testing.T) {
 		t.Errorf("location = %q, want the provider's", to)
 	}
 }
+
+// The front end's failure redirect still wins over the API's error writer.
+//
+// This is the regression guard for the shape this nearly took. A generated
+// server needs the provider routes to report through the same writer as every
+// other route, and the obvious way to arrange that — have the generator fill in
+// OAuth.OnError — would have been silently wrong: auth.New installs the handoff
+// redirect *into* OnError, and only when it is nil. Every project with a `web:`
+// block would have traded its sign-in page for a JSON envelope on the API's own
+// origin. Fail is a second field for exactly that reason.
+func TestTheFrontEndsRedirectWinsOverTheErrorWriter(t *testing.T) {
+	t.Parallel()
+
+	wrote := 0
+	front, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Browser:    &handoff.Config{Origin: "https://app.example.com"},
+			Fail: func(http.ResponseWriter, *http.Request, error) {
+				wrote++
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	front.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	if wrote != 0 {
+		t.Errorf("%d calls to Fail; the front end owns what a person sees", wrote)
+	}
+	want := "https://app.example.com/auth/callback?error=cancelled"
+	if to := res.Header().Get("Location"); to != want {
+		t.Errorf("location = %q, want %q", to, want)
+	}
+}
+
+// And with no front end, the error writer is what answers — which is the
+// headless deployment a generated server sets it for.
+func TestTheErrorWriterReachesTheProviderRoutes(t *testing.T) {
+	t.Parallel()
+
+	var got error
+	headless, err := auth.New(auth.Config{
+		Pool: unconnected(t),
+		OAuth: auth.OAuth{
+			Providers:  []oauth.Provider{oauth.Google("id", "secret")},
+			BaseURL:    "https://api.example.com",
+			SigningKey: bytes.Repeat([]byte("k"), 32),
+			Fail: func(w http.ResponseWriter, _ *http.Request, err error) {
+				got = err
+				w.WriteHeader(http.StatusTeapot)
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	mux := http.NewServeMux()
+	headless.Mount(mux)
+
+	res := httptest.NewRecorder()
+	mux.ServeHTTP(res, httptest.NewRequest(http.MethodGet,
+		"http://api.example.com/auth/oauth/google/callback?error=access_denied", nil))
+
+	if res.Code != http.StatusTeapot {
+		t.Errorf("status = %d, want the writer's 418", res.Code)
+	}
+	if got == nil {
+		t.Fatal("the error writer was not reached")
+	}
+	if code := rigerr.CodeOf(got); code != rigerr.CodeBadRequest {
+		t.Errorf("code = %q, want BadRequest", code)
+	}
+}

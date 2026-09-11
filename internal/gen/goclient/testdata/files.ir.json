@@ -62,6 +62,11 @@
             "description": "The client was built against an API revision this server no longer serves."
           },
           {
+            "name": "Unavailable",
+            "wire": "Unavailable",
+            "description": "Something the server depends on did not answer in time. Retry."
+          },
+          {
             "name": "Internal",
             "wire": "Internal",
             "description": "Something went wrong on the server."

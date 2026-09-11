@@ -277,6 +277,12 @@ func Call(ctx context.Context, name string, f func(context.Context) error) error
 // permission is a server that worked, and a trace where every not-found is red
 // is a trace nobody reads — the same argument that puts those lines at debug
 // rather than at error.
+//
+// A cancelled caller is not a failure either, whatever status it arrives with.
+// The generated server does not call this at all in that case, but this is
+// exported and reachable on its own, and [record] has always taken that arm on
+// the repository-layer path — one fact should not get two answers depending on
+// which road it came in by.
 func Fail(ctx context.Context, status int, err error) {
 	span := trace.SpanFromContext(ctx)
 	if !span.IsRecording() {
@@ -284,6 +290,14 @@ func Fail(ctx context.Context, status int, err error) {
 	}
 
 	span.RecordError(err)
+	if errors.Is(err, context.Canceled) {
+		// The caller went away. Recorded, for the same reason [record] records it
+		// — a span that stops halfway with no explanation is the thing you would
+		// go looking for — but not an error, because nothing here failed. The
+		// status says 500 only because a request nobody is waiting for has no
+		// status of its own.
+		return
+	}
 	if status >= 500 {
 		span.SetStatus(codes.Error, err.Error())
 		// So [Span.End] leaves the reason alone. It runs after this and knows

@@ -219,6 +219,14 @@ func IsUnsupportedMediaType(err error) bool {
 // handler swallows.
 func IsUpgradeRequired(err error) bool { return CodeOf(err) == rigerr.CodeUpgradeRequired }
 
+// IsUnavailable reports whether something the server depends on did not answer
+// in time.
+//
+// The one failure here worth retrying on its own. Nothing was rejected and
+// nothing is broken — the request was not answered — so the same request sent
+// again may well succeed, which is not true of any other code in this list.
+func IsUnavailable(err error) bool { return CodeOf(err) == rigerr.CodeUnavailable }
+
 // maxErrorBody bounds what is read from a failure that does not claim to be the
 // server's. Enough to recognize a gateway's error page, not enough to be a
 // memory problem.

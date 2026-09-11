@@ -54,7 +54,7 @@ types are wrapped rather than plain pointers.
 
 ## Errors
 
-Every failure carries a machine-readable code from a closed set of eight:
+Every failure carries a machine-readable code from a closed set of twelve:
 
 | Code | Status | |
 |---|---|---|
@@ -68,6 +68,7 @@ Every failure carries a machine-readable code from a closed set of eight:
 | `TooLarge` | 413 | The body is larger than this endpoint accepts |
 | `UnsupportedMediaType` | 415 | The body's content type is not one this endpoint takes |
 | `UpgradeRequired` | 426 | Built against an API revision this server no longer serves |
+| `Unavailable` | 503 | Something the server depends on did not answer in time. Retry |
 | `Internal` | 500 | Something went wrong on the server |
 
 An `Internal` body never says what happened: the message is always "something

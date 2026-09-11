@@ -906,6 +906,7 @@
           "TooLarge",
           "UnsupportedMediaType",
           "UpgradeRequired",
+          "Unavailable",
           "Internal"
         ],
         "description": "Machine-readable reason a request failed.",
@@ -920,6 +921,7 @@
           "TooLarge",
           "UnsupportedMediaType",
           "UpgradeRequired",
+          "Unavailable",
           "Internal"
         ]
       },

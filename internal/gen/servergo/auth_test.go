@@ -656,3 +656,66 @@ func defaultAuth(t *testing.T) *ir.Auth {
 	}
 	return p.Config.Auth.IR()
 }
+
+// The provider routes report through this package too, which they did not.
+//
+// They were the only routes rig serves that wrote no line at any level: the
+// generator forwarded Hooks.OAuth.OnError and nothing else, so a project that
+// set none got oauth's own text/plain answer and a failed provider sign-in
+// existed in the authentication log and nowhere else.
+//
+// It is a second field rather than OnError because auth.New installs the
+// front-end failure redirect into OnError, and only when it is nil — filling
+// that in here would take the sign-in page away from every project with a
+// `web:` block.
+func TestTheProviderRoutesFailThroughThisPackageToo(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	got := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(got, "Fail: func(w http.ResponseWriter, r *http.Request, err error) {") {
+		t.Error("the provider routes get no error writer, so a refused sign-in is logged nowhere")
+	}
+	// The hook still goes through, and still comes first.
+	if !strings.Contains(got, "OnError:           h.OAuth.OnError,") {
+		t.Error("a project's own OnError should still reach the provider routes")
+	}
+
+	// One Server literal, shared by both writers. A second would be a second
+	// answer to "what does a request look like", which is what requestContext
+	// exists to stop there being — and the two had already drifted once.
+	if n := strings.Count(got, "srv := Server{"); n != 1 {
+		t.Errorf("%d Server literals, want exactly 1 shared by both error writers", n)
+	}
+}
+
+// And the comment above the shared Server counts what is actually there.
+//
+// One writer without providers, two with. It is a generated comment, so the
+// wrong number is not a sentence somebody skims past once — it is in every
+// project that configured no providers, above a block with one writer in it,
+// and a reader who counts finds out the comment was wrong rather than that they
+// miscounted.
+func TestTheSharedServerCommentCountsTheWriters(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	withProviders := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(withProviders, "// The server the two error writers below report through.") {
+		t.Error("with providers there are two writers, and the comment should say so")
+	}
+
+	doc = gentest.LoadDocument(t, filepath.Join("testdata", authFixture))
+	doc.API.Auth = defaultAuth(t)
+	doc.API.Web = nil
+	without := find(t, gentest.Run(t, servergo.New(), doc, authOpts()), "auth.gen.go")
+
+	if !strings.Contains(without, "// The server the error writer below reports through.") {
+		t.Error("without providers there is one writer, and the comment should say so")
+	}
+	if strings.Contains(without, "two error writers") {
+		t.Error("the comment counts two writers where only one is generated")
+	}
+}
