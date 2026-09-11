@@ -51,7 +51,7 @@ func (e *emitter) authFile(auth *ir.Auth) (gen.Artifact, error) {
 	// Which routes exist follows from the configuration, the same way the
 	// server's own mounting does. A client that asked for one that is not there
 	// would get a 404 saying only that the URL is wrong.
-	b.L("HasRegistration: %t,", auth.AllowRegistration)
+	b.L("HasEmailCode: %t,", auth.EmailCode.Enabled)
 	b.L("HasTenantCreation: %t,", auth.AllowTenantCreation)
 	b.L("HasIdentitySessions: true,")
 	b.L("HasAPIKeys: true,")

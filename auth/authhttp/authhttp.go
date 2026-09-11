@@ -181,14 +181,20 @@ type Config struct {
 	// exists — off means absent rather than 403, so there is nothing to probe.
 	AllowTenantCreation bool
 
-	// AllowRegistration mounts POST /auth/register, where a stranger creates an
-	// account with no tenant.
+	// AllowEmailCode mounts POST /auth/email-code and
+	// POST /auth/email-code/verify, the sign-in for somebody with no account at
+	// a configured provider.
 	//
-	// Off by default, and it is the same kind of decision as who may create a
-	// tenant: invite-only and public sign-up are both ordinary products, and
-	// rig will not pick one. Off means the endpoint does not exist rather than
-	// answering 403, so nothing is there to probe.
-	AllowRegistration bool
+	// Off by default. Off means the endpoints do not exist rather than
+	// answering 403, so nothing is there to probe — and a deployment with no
+	// provider and this off has no way in at all, which rig does not refuse
+	// because a service that only provisions and invites is a legitimate thing
+	// to build.
+	//
+	// Whether a code may go to an address rig has never seen is a separate
+	// decision, and it lives on the account service:
+	// [github.com/simonjanss/rig/auth/account.EmailCodeOptions.AllowProvisioning].
+	AllowEmailCode bool
 
 	// Grants fills in a caller's roles and permissions. Nil means every
 	// authenticated caller has none, which makes any endpoint with a permission
@@ -245,13 +251,18 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 		mux.HandleFunc(method+" "+h.base+path, fn)
 	}
 
-	route("POST /login", h.login)
+	// Session routes, and they are mounted whatever the deployment authenticates
+	// with: ending a session and rotating one are not about how it started.
 	route("POST /logout", h.logout)
 	route("POST /refresh", h.refresh)
 
-	route("POST /password/reset", h.requestReset)
-	route("POST /password/reset/confirm", h.confirmReset)
-	route("POST /password/change", h.changePassword)
+	// The mailed-code sign-in. Off means the routes do not exist rather than
+	// answering 403, so there is nothing to probe — the same choice
+	// AllowRegistration used to make.
+	if h.cfg.AllowEmailCode {
+		route("POST /email-code", h.requestEmailCode)
+		route("POST /email-code/verify", h.verifyEmailCode)
+	}
 
 	route("POST /email/verify", h.verifyEmail)
 	route("POST /email/verify/resend", h.resendVerification)
@@ -259,12 +270,18 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	// Creating an account is not CRUD on a table: see provision.
 	route("POST /accounts", h.provision)
 
+	// Landed on before anything is proved, so it is unauthenticated and reveals
+	// only as much as a trustworthy page can be built from. It consumes nothing
+	// and extends nothing.
+	route("GET /invitations/preview", h.previewInvitation)
+
 	// An invitation is redeemed without a credential, so it is unauthenticated —
 	// the token is the credential, for one use.
 	route("POST /invitations/accept", h.acceptInvitation)
 
-	// Listing and withdrawing are administrative, and need the same permission
-	// inviting does.
+	// Inviting, listing and withdrawing are administrative, and all three need
+	// the permission provisioning needs.
+	route("POST /invitations", h.inviteSomebody)
 	route("GET /invitations", h.listInvitations)
 	route("DELETE /invitations/{id}", h.revokeInvitation)
 
@@ -272,9 +289,6 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	// reach. Nothing here touches application data, because there is no tenant
 	// to touch it in.
 	if h.cfg.Identities != nil {
-		if h.cfg.AllowRegistration {
-			route("POST /register", h.register)
-		}
 		route("GET /me/invitations", h.myInvitations)
 		route("POST /me/invitations/accept", h.acceptFromThePicker)
 		route("GET /me/tenants", h.myTenants)

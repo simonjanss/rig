@@ -24,23 +24,59 @@ import (
 	"github.com/simonjanss/rig/runtime/tenancy"
 )
 
-func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+// requestEmailCode mails a sign-in code and always answers 204.
+//
+// Whether the address is registered is not the caller's business, and any
+// difference in status, body or timing is the enumeration this endpoint would
+// otherwise be used for. A rate-limit refusal is still reported: that is about
+// the caller's behaviour rather than about the address.
+func (h *Handler) requestEmailCode(w http.ResponseWriter, r *http.Request) {
 	tenantID, err := h.cfg.Tenant(r)
 	if err != nil {
 		h.fail(w, r, err)
 		return
 	}
 
-	var in authwire.LoginRequest
+	var in authwire.EmailCodeRequest
 	if err := decode(r, &in); err != nil {
 		h.fail(w, r, err)
 		return
 	}
 
-	res, err := h.cfg.Accounts.Login(r.Context(), account.LoginInput{
+	if err := h.cfg.Accounts.RequestEmailCode(r.Context(), account.RequestEmailCodeInput{
 		TenantID:     tenantID,
 		EmailAddress: in.EmailAddress,
-		Password:     in.Password,
+		IPAddress:    h.addrString(r),
+		UserAgent:    r.UserAgent(),
+	}); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// verifyEmailCode signs somebody in with the code they were mailed.
+//
+// It answers the body every sign-in answers, which is the whole reason the flow
+// fits: the picker, the tenant list and "where you were last" work unchanged
+// because there is nothing new in the response.
+func (h *Handler) verifyEmailCode(w http.ResponseWriter, r *http.Request) {
+	tenantID, err := h.cfg.Tenant(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	var in authwire.VerifyEmailCodeRequest
+	if err := decode(r, &in); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	res, err := h.cfg.Accounts.VerifyEmailCode(r.Context(), account.VerifyEmailCodeInput{
+		TenantID:     tenantID,
+		EmailAddress: in.EmailAddress,
+		Code:         in.Code,
 		Remember:     in.Remember,
 		Client:       clientOf(in.Client),
 		IPAddress:    h.addrString(r),
@@ -80,76 +116,6 @@ func (h *Handler) refresh(w http.ResponseWriter, r *http.Request) {
 	}
 
 	pair, err := h.cfg.Accounts.Refresh(r.Context(), in.RefreshToken)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
-}
-
-// requestReset always answers 202.
-//
-// Whether the address is registered is not the caller's business, and any
-// difference in status, body, or timing is the enumeration this endpoint is
-// most often used for.
-func (h *Handler) requestReset(w http.ResponseWriter, r *http.Request) {
-	tenantID, err := h.cfg.Tenant(r)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	var in authwire.ResetRequest
-	if err := decode(r, &in); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	// A rate-limit refusal is still reported: it is about the caller's
-	// behavior, not about whether the address exists.
-	if err := h.cfg.Accounts.RequestPasswordReset(r.Context(), tenantID, in.EmailAddress, h.addrString(r)); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusAccepted)
-}
-
-func (h *Handler) confirmReset(w http.ResponseWriter, r *http.Request) {
-	var in authwire.ConfirmResetRequest
-	if err := decode(r, &in); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	if err := h.cfg.Accounts.ConfirmPasswordReset(r.Context(), in.Token, in.NewPassword, h.addrString(r)); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	w.WriteHeader(http.StatusNoContent)
-}
-
-// changePassword returns a fresh pair, because it revoked the caller's own.
-func (h *Handler) changePassword(w http.ResponseWriter, r *http.Request) {
-	claims, err := h.Claims(r)
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	var in authwire.ChangePasswordRequest
-	if err := decode(r, &in); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	pair, err := h.cfg.Accounts.ChangePassword(r.Context(), account.ChangePasswordInput{
-		TenantID:        claims.TenantID,
-		AccountID:       claims.AccountID,
-		CurrentPassword: in.CurrentPassword,
-		NewPassword:     in.NewPassword,
-		IPAddress:       h.addrString(r),
-		UserAgent:       r.UserAgent(),
-	})
 	if err != nil {
 		h.fail(w, r, err)
 		return

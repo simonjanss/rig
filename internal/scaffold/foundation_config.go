@@ -44,22 +44,21 @@ expose: false`,
 expose: false`,
 			`restore_window_days: 30`,
 		),
-		config("rig_identity_credential", "IdentityCredential", notExposed),
 		config("rig_identity_verification", "IdentityVerification", notExposed,
 			`enums:
   rig_identity_verification_kind:
     name: IdentityVerificationKind
-    description: What a single-use link is for.
+    description: What a single-use secret is for.
     values:
       EmailVerification:
         name: EmailVerification
         description: Confirms that an address belongs to the person who gave it.
-      PasswordReset:
-        name: PasswordReset
-        description: Lets somebody set a new password without knowing the old one.
+      EmailCode:
+        name: EmailCode
+        description: A short code mailed to an address and typed back to sign in.
       Invitation:
         name: Invitation
-        description: Brings a person into a tenant, whether or not they already have an identity.`,
+        description: A pending membership. Accepting it is what creates the account in the tenant.`,
 		),
 		config("rig_account", "Account",
 			`# Read-only from the outside. The reason to expose this table is an
@@ -69,7 +68,7 @@ expose: false`,
 # No generated write, and it is the sharpest case of the rule this file is
 # written to: the auth module reaches these rows through its own queries, so
 # a generated write path is a second door into them — one where nothing
-# hashes a password, sends an invitation, or ends the sessions of somebody
+# sends an invitation, verifies an address, or ends the sessions of somebody
 # who has just been deactivated. Joining a tenant, changing an address and
 # deactivating an account are auth endpoints for that reason.
 #
@@ -96,7 +95,7 @@ operations: [Get, List, Search]`,
     format: EmailAddress
   kind:
     # A person does not become a service account, and a service account has no
-    # password to make it a person. Which it is, is decided when it is created.
+    # identity to make it a person. Which it is, is decided when it is created.
     operations: [Read]
   role:
     # The coarse level. Read here and written by the auth endpoints, because
@@ -115,7 +114,7 @@ operations: [Get, List, Search]`,
     values:
       Person:
         name: Person
-        description: Somebody who signs in. They have an identity, and the identity has the password.
+        description: Somebody who signs in. They have an identity, and the identity is what a provider or a code authenticates.
       Service:
         name: Service
         description: What an integration's key acts as. It has no identity, so there is nothing to sign in with.
@@ -177,7 +176,7 @@ operations: [Get, List, Search]`,
     values:
       LoginAttempted:
         name: LoginAttempted
-        description: A sign-in was tried. Recorded before the password is checked.
+        description: A sign-in was tried. Recorded before the code is checked.
       LoginSucceeded:
         name: LoginSucceeded
         description: A sign-in worked. It clears the failure window for that address.
@@ -196,15 +195,9 @@ operations: [Get, List, Search]`,
       TokenReuseDetected:
         name: TokenReuseDetected
         description: A consumed refresh token was presented again, so its family was revoked.
-      PasswordResetRequested:
-        name: PasswordResetRequested
-        description: Somebody asked for a reset link.
-      PasswordResetCompleted:
-        name: PasswordResetCompleted
-        description: A reset link was used to set a new password.
-      PasswordChanged:
-        name: PasswordChanged
-        description: Somebody who knew their password set a new one.
+      EmailCodeRequested:
+        name: EmailCodeRequested
+        description: A sign-in code was asked for. Recorded whether or not the address exists, so that requesting one cannot be used to find out.
       EmailVerified:
         name: EmailVerified
         description: An address was confirmed.
@@ -231,13 +224,13 @@ operations: [Get, List, Search]`,
         description: An account was created in a tenant, by a person or by an integration's key.
       InvitationSent:
         name: InvitationSent
-        description: Somebody was invited into a tenant and a single-use link was minted.
+        description: Somebody was invited into a tenant. They are not a member yet, and accepting is what makes them one.
       InvitationAccepted:
         name: InvitationAccepted
-        description: An invitation was redeemed. It confirms the address and, for a first account, sets the password.
+        description: An invitation was redeemed, which is what created the account in the tenant. It confirms the address too.
       InvitationRevoked:
         name: InvitationRevoked
-        description: An invitation was withdrawn before it was used, so the link stopped working and the account it was for was removed.
+        description: An invitation was withdrawn before it was used, so the link stopped working. No account existed to remove.
       TenantSwitched:
         name: TenantSwitched
         description: Somebody moved to another tenant they belong to, which issues a session for that tenant's account.
@@ -309,8 +302,8 @@ expose: false`,
 // type and size to describe it; the storage key, the checksum, the declared type
 // and the tenant are the server's bookkeeping and never leave it. The storage
 // key is the one that would actually matter — it is the thing a signed URL is
-// built from, and syncing it is the same class of mistake as syncing a password
-// hash.
+// built from, and syncing it is the same class of mistake as syncing a session's
+// secret.
 //
 // There is no write path to generate. The endpoints that put a file anywhere are
 // the upload and the delete rig synthesizes against the row that owns it, and a
@@ -383,7 +376,7 @@ expose: false`,
 //
 // Never exposed, and the reason is stronger than rig_throttle's. A row here is
 // one owed mail, keyed to the single-use link it will carry — so a listing would
-// answer "who has asked to reset their password, and whose invitation has not
+// answer "who has been sent a sign-in code, and whose invitation has not
 // gone out yet" to anybody who could read it, and a write would let somebody
 // re-queue a link they do not hold. The queue's only doors are the flows that
 // mint links and the dispatcher that sends them.
@@ -391,7 +384,7 @@ func verificationDeliveryConfigs() []tableConfig {
 	return []tableConfig{
 		config("rig_identity_verification_delivery", "IdentityVerificationDelivery",
 			`# Never exposed. A row is one owed mail, keyed to a single-use link:
-# a listing would say who has asked to reset their password and whose
+# a listing would say who has been sent a sign-in code and whose
 # invitation has not gone out, and a write would let somebody re-queue a
 # link they never held. The flows that mint links and the dispatcher that
 # sends them are the only doors.

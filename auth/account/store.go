@@ -5,15 +5,13 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-
-	"github.com/simonjanss/rig/auth/password"
 )
 
 // Identity is a person who can sign in, independent of where they work.
 //
-// One address, one password, one set of linked providers, no tenant. Somebody
-// who belongs to two tenants has one identity and two accounts, and the identity
-// is what a password, a reset link and a provider link all belong to.
+// One address, one set of linked providers, no tenant. Somebody who belongs to
+// two tenants has one identity and two accounts, and the identity is what a
+// sign-in code, an invitation and a provider link all belong to.
 type Identity struct {
 	ID uuid.UUID
 
@@ -50,8 +48,8 @@ type Account struct {
 	TenantID uuid.UUID
 
 	// IdentityID is the person this account belongs to, and nil exactly when
-	// this is a service account — which is nobody, has no credential, and cannot
-	// sign in.
+	// this is a service account — which is nobody, so there is nothing to sign
+	// in as.
 	IdentityID *uuid.UUID
 
 	// EmailAddress is a copy of the identity's, kept here so that listing the
@@ -60,8 +58,8 @@ type Account struct {
 	DisplayName  string
 
 	// Kind is whether this is a person or a service account an integration acts
-	// as. A service account has no credential and cannot sign in, which Login
-	// enforces rather than leaving to whoever wrote the row.
+	// as. A service account cannot sign in, which every sign-in path enforces
+	// rather than leaving to whoever wrote the row.
 	Kind Kind
 
 	// Role is the coarse level in this tenant: Owner, Admin or Basic. Finer
@@ -109,10 +107,10 @@ type Tenant struct {
 type Kind string
 
 const (
-	// KindPerson signs in with a password or a provider.
+	// KindPerson signs in with a provider or a mailed code.
 	KindPerson Kind = "Person"
-	// KindService is what an integration's key acts as. It has no credential, so
-	// there is nothing to phish and nothing to reset.
+	// KindService is what an integration's key acts as. It has no identity, so
+	// there is nothing to phish and nothing to sign in as.
 	KindService Kind = "Service"
 )
 
@@ -152,47 +150,37 @@ func (a *Account) Location() *time.Location {
 	return loc
 }
 
-// Credential is a person's password.
-//
-// One per identity rather than one per account, so somebody in three tenants has
-// one password to remember and one password to change.
-type Credential struct {
-	ID         uuid.UUID
-	IdentityID uuid.UUID
-
-	PasswordHash string
-	Algorithm    string
-	Params       password.Params
-
-	CreatedAt time.Time
-	UpdatedAt *time.Time
-}
-
-// VerificationKind is what a single-use link is for.
+// VerificationKind is what a single-use secret is for.
 type VerificationKind string
 
 const (
 	// KindEmailVerification confirms an address belongs to whoever gave it.
 	KindEmailVerification VerificationKind = "EmailVerification"
-	// KindPasswordReset lets somebody set a password without knowing the old one.
-	KindPasswordReset VerificationKind = "PasswordReset"
-	// KindInvitation brings a person into a tenant, whether or not they already
-	// have an identity.
+	// KindEmailCode is a short code mailed to an address and typed back, which
+	// is how somebody with no provider account signs in.
+	//
+	// The one kind whose secret is guessable, which is why it is the only one
+	// with an attempt ceiling and the only one not found by its hash — see
+	// [Verification.Attempts] and [Store.LiveCodeFor].
+	KindEmailCode VerificationKind = "EmailCode"
+	// KindInvitation is a pending membership. Accepting it is what creates the
+	// account in the tenant, so the row carries everything that account will be
+	// made from.
 	KindInvitation VerificationKind = "Invitation"
 )
 
-// Verification is a single-use link.
+// Verification is a single-use secret.
 //
-// Only the hash is stored, for the same reason a password is not stored: a
-// reset link is a credential for the few minutes it lives, and a database dump
-// that contains live ones is a database dump that hands over every account.
+// Only the hash is stored. A sign-in code is a live credential for the few
+// minutes it lasts, and a database dump containing live ones is a database dump
+// that hands over every account in it.
 type Verification struct {
 	ID         uuid.UUID
 	IdentityID uuid.UUID
 
-	// InvitedToTenantID is the tenant an invitation is into, and nil for a link
+	// InvitedToTenantID is the tenant an invitation is into, and nil for a row
 	// about the person rather than one tenant — confirming their address or
-	// resetting their password, both of which are global.
+	// signing them in, both of which are global.
 	InvitedToTenantID *uuid.UUID
 
 	Kind      VerificationKind
@@ -202,14 +190,35 @@ type Verification struct {
 	ExpiresAt  time.Time
 	ConsumedAt *time.Time
 
-	// RevokedAt is when the link was cancelled, which is not the same as used.
+	// RevokedAt is when the row was cancelled, which is not the same as used.
 	// An invitation somebody withdrew and one somebody accepted are different
 	// things to find in an audit trail, so the table keeps both — the same
 	// distinction rig_account_token makes between a rotation and a revocation.
 	RevokedAt *time.Time
+
+	// Attempts is how many wrong codes have been offered for this row, and it
+	// matters for [KindEmailCode] alone. Six digits are guessable in a way a
+	// 32-byte token is not, so a code has to die after a handful of tries rather
+	// than merely be slowed down by a rate limit.
+	Attempts int
+
+	// What an invitation carries, and nil for every other kind. It is what
+	// accepting creates the account from, which is what makes an invitation a
+	// pending membership rather than a mail about a membership that already
+	// exists.
+	//
+	// A database CHECK ties InvitedRole and InvitedToTenantID to the kind, so
+	// an invitation with neither cannot be written at all.
+	InvitedRole        *Role
+	InvitedDisplayName string
+	// InvitedByAccountID and InvitedByAPIKeyID are who asked. They become the
+	// created_by pair of the account accepting creates, so the provenance
+	// survives the invitation being consumed.
+	InvitedByAccountID *uuid.UUID
+	InvitedByAPIKeyID  *uuid.UUID
 }
 
-// Usable reports whether the link may still be redeemed.
+// Usable reports whether the secret may still be redeemed.
 func (v *Verification) Usable(now time.Time) bool {
 	return v.ConsumedAt == nil && v.RevokedAt == nil && now.Before(v.ExpiresAt)
 }
@@ -236,7 +245,6 @@ type Membership struct {
 type Invitation struct {
 	ID         uuid.UUID
 	IdentityID uuid.UUID
-	AccountID  uuid.UUID
 	TenantID   uuid.UUID
 	// TenantName is which tenant it is into. An invitation listed to the
 	// person receiving it is otherwise a row of identifiers: they have not been
@@ -244,23 +252,21 @@ type Invitation struct {
 	TenantName string
 
 	EmailAddress string
-	DisplayName  string
-	Role         Role
+	// DisplayName is what the inviter called them, falling back to the name the
+	// person already has when the inviter said nothing.
+	DisplayName string
+	// Role is what accepting will grant, which is worth showing: being invited
+	// as an Admin is something to know before pressing the button.
+	Role Role
+
+	// InvitedByAccountID and InvitedByName are who sent it. The name is empty
+	// when a key sent it, and when the person who did has since been removed —
+	// both of which a landing page has to render rather than fail on.
+	InvitedByAccountID *uuid.UUID
+	InvitedByName      string
 
 	CreatedAt time.Time
 	ExpiresAt time.Time
-}
-
-// DeleteAccountInput removes somebody from a tenant.
-type DeleteAccountInput struct {
-	TenantID  uuid.UUID
-	AccountID uuid.UUID
-
-	At time.Time
-	// ByAccountID and ByAPIKeyID are who did it, for the audit columns — who,
-	// and through what.
-	ByAccountID *uuid.UUID
-	ByAPIKeyID  *uuid.UUID
 }
 
 // Store is the persistence the flows need.
@@ -289,9 +295,9 @@ type Store interface {
 	AccountForIdentity(ctx context.Context, tenantID, identityID uuid.UUID) (*Account, error)
 	// AccountsForIdentity returns every account a person has, in every tenant.
 	//
-	// It is what makes a password change mean what it says: the credential is
-	// global, so ending "every session" has to reach the tenants the request was
-	// not made from.
+	// It is what makes "sign me out everywhere" mean what it says: a person is
+	// global and their sessions are not, so ending every one of them has to reach
+	// the tenants the request was not made from.
 	AccountsForIdentity(ctx context.Context, identityID uuid.UUID) ([]*Account, error)
 
 	// LastAccountForIdentity is the account a person most recently held a
@@ -321,9 +327,9 @@ type Store interface {
 	//
 	// It is separate from the rest because creating one is not a flow this
 	// package owns end to end: who may join a tenant is a product decision,
-	// and Provision is the part that is the same everywhere — the address is
-	// checked, the tenant's domains are honoured, nothing is written twice, and
-	// no credential comes into existence by accident.
+	// and [Service.Provision] is the part that is the same everywhere — the
+	// address is checked, the tenant's domains are honoured, and nothing is
+	// written twice.
 	Insert(ctx context.Context, a *Account) error
 
 	// InsertTenant writes a tenant row.
@@ -332,13 +338,6 @@ type Store interface {
 	// TenantDomains are the email domains this tenant's accounts may use, or
 	// empty for no restriction.
 	TenantDomains(ctx context.Context, tenantID uuid.UUID) ([]string, error)
-
-	// Credential returns a person's password, or nil when they have none —
-	// which is the case for somebody who only ever signed in through a
-	// provider.
-	Credential(ctx context.Context, identityID uuid.UUID) (*Credential, error)
-	// SaveCredential creates or replaces a person's password.
-	SaveCredential(ctx context.Context, c *Credential) error
 
 	CreateVerification(ctx context.Context, v *Verification) error
 	// PendingInvitations are the live invitations into one tenant: minted, not
@@ -351,13 +350,23 @@ type Store interface {
 	// where they have been asked to go — which is the only thing they can see
 	// before they belong anywhere.
 	InvitationsForIdentity(ctx context.Context, identityID uuid.UUID) ([]Invitation, error)
-	// RevokeVerification cancels a link. It must be a no-op on one that is
+	// InvitationByID and InvitationByToken are one invitation, assembled the
+	// way the two listings assemble theirs.
+	//
+	// They exist for the two callers that hold one invitation rather than a
+	// person's set of them: the mail dispatcher, which has a delivery and needs
+	// the tenant's name to put in the mail, and the preview, which has a token
+	// out of a URL and needs to say what it is for. Neither filters on expiry —
+	// that is a comparison against the service's clock, and putting it in SQL is
+	// how the in-memory double and the real store end up disagreeing.
+	InvitationByID(ctx context.Context, id uuid.UUID) (*Invitation, error)
+	InvitationByToken(ctx context.Context, hash []byte) (*Invitation, error)
+
+	// RevokeVerification cancels a row. It must be a no-op on one that is
 	// already consumed or revoked, and report whether it changed anything, so
 	// two requests racing cannot both claim to have withdrawn it.
 	RevokeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error)
-	// SoftDeleteAccount removes somebody from a tenant, recording who did it.
-	SoftDeleteAccount(ctx context.Context, in DeleteAccountInput) error
-	// VerificationByHash finds a link by the hash of its token, or nil.
+	// VerificationByHash finds a row by the hash of its token, or nil.
 	VerificationByHash(ctx context.Context, hash []byte) (*Verification, error)
 	// VerificationByID finds one by identifier, or nil.
 	//
@@ -367,27 +376,52 @@ type Store interface {
 	// proves who they are, which is the stronger claim of the two — so the
 	// identifier is enough, and it is the only thing a listing hands out.
 	VerificationByID(ctx context.Context, id uuid.UUID) (*Verification, error)
-	// ConsumeVerification marks a link used. It must be a no-op on a link that
-	// is already consumed, so that two requests racing to redeem one cannot
-	// both win.
+	// ConsumeVerification marks a row used. It must be a no-op on one that is
+	// already consumed, so that two requests racing to redeem it cannot both
+	// win.
 	ConsumeVerification(ctx context.Context, id uuid.UUID, at time.Time) (bool, error)
+
+	// LiveVerification is the newest row of a kind for one person that may still
+	// be redeemed, or nil.
+	//
+	// It is how a sign-in code is found, and the reason there are two lookups
+	// rather than one: a request carries the address and the code, not a token,
+	// and six digits cannot be a key. [Store.VerificationByHash] is for the
+	// kinds whose secret is long enough to be one.
+	LiveVerification(ctx context.Context, identityID uuid.UUID, kind VerificationKind) (*Verification, error)
+
+	// ChargeVerificationAttempt charges one wrong guess against a row and
+	// revokes it when that was its last, reporting the count after the charge
+	// and whether the row is now dead.
+	//
+	// It must be one statement. A read followed by a write is a window two
+	// concurrent guesses both fit through, which is a handful of free attempts
+	// against a secret that only has a million values.
+	//
+	// Revoked rather than a state of its own: [Verification.Usable] already
+	// refuses a revoked row and so does the mail queue, so nothing else has to
+	// learn that a ceiling exists. A row burned by guessing and one an
+	// administrator withdrew are told apart by [Verification.Attempts].
+	ChargeVerificationAttempt(ctx context.Context, id uuid.UUID, max int, at time.Time) (attempts int, dead bool, err error)
 
 	InTx(ctx context.Context, fn func(ctx context.Context) error) error
 }
 
-// Notifier delivers the links this package mints.
+// Notifier delivers the secrets this package mints.
 //
 // Sending mail is the application's business: it knows the templates, the
 // sender, the locale, and whether it uses a queue. What rig knows is when a
 // link exists and what it says.
 // It takes an identity rather than an account because that is what a link is
-// about: the address being confirmed and the password being reset belong to the
+// about: the address being confirmed and the code being sent belong to the
 // person, not to one of the tenants they work in.
 //
-// An invitation is the exception and takes the account too, because it is about
-// one tenant: the mail has to say which tenant somebody is being invited to,
-// and "you have been invited" with no answer to "invited where" is a mail nobody
-// can act on.
+// An invitation is the exception and takes the invitation too, because it is
+// about one tenant: the mail has to say which tenant somebody is being invited
+// to, who asked, and as what — "you have been invited" with no answer to
+// "invited where" is a mail nobody can act on. It is the invitation rather than
+// an account because there is no account yet, and that is the point of the
+// flow: accepting is what creates one.
 //
 // **Where this is called from depends on [Config.Outbox].** Nil and it is the
 // request that asked for the link, so a slow provider is a slow page. Set and it
@@ -408,30 +442,37 @@ type Store interface {
 // This is the one seam in rig where an idempotency key is the wrong answer —
 // notify.Delivery.ID says the opposite, and means it.
 type Notifier interface {
-	SendPasswordReset(ctx context.Context, i *Identity, token string) error
+	// SendEmailCode delivers a short numeric code somebody types back to sign
+	// in. It is the one secret here that a person reads out rather than clicks,
+	// so the mail wants it legible and on its own line.
+	SendEmailCode(ctx context.Context, i *Identity, code string) error
 	SendEmailVerification(ctx context.Context, i *Identity, token string) error
-	SendInvitation(ctx context.Context, i *Identity, a *Account, token string) error
+	SendInvitation(ctx context.Context, i *Identity, inv *Invitation, token string) error
 }
 
-// NoNotifier drops every link, silently and successfully.
+// NoNotifier drops every secret, silently and successfully.
 //
 // It is the default so that a manager can be built in one line during
-// development. In production it means nobody can ever reset a password, and
-// nothing anywhere says so — this type is substituted for a nil Notifier without
-// a warning, which is a thing to know rather than a thing to rely on. Compare
+// development. In production it means nobody can confirm an address and nothing
+// anywhere says so — this type is substituted for a nil Notifier without a
+// warning, which is a thing to know rather than a thing to rely on. Compare
 // notify.NoSender, which refuses instead, having been written after somebody met
 // this failure.
 //
-// [New] does refuse one combination: a [Config.Outbox] with this as the notifier
-// is a queue whose rows are written and then dropped, which is a table that grows
-// forever behind mail that never goes.
+// [New] refuses two combinations rather than dropping them. A [Config.Outbox]
+// with this as the notifier is a queue whose rows are written and then thrown
+// away, which is a table that grows forever behind mail that never goes. And
+// [EmailCodeOptions.Enabled] with this as the notifier is a sign-in nobody can
+// ever complete — the only way in, minting codes into a void.
 type NoNotifier struct{}
 
-// SendPasswordReset implements [Notifier].
-func (NoNotifier) SendPasswordReset(context.Context, *Identity, string) error { return nil }
+// SendEmailCode implements [Notifier].
+func (NoNotifier) SendEmailCode(context.Context, *Identity, string) error { return nil }
 
 // SendEmailVerification implements [Notifier].
 func (NoNotifier) SendEmailVerification(context.Context, *Identity, string) error { return nil }
 
 // SendInvitation implements [Notifier].
-func (NoNotifier) SendInvitation(context.Context, *Identity, *Account, string) error { return nil }
+func (NoNotifier) SendInvitation(context.Context, *Identity, *Invitation, string) error {
+	return nil
+}

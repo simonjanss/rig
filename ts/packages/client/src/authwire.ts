@@ -135,10 +135,25 @@ export type Handoff = TokenPair & {
     identityExpiresAt: string;
 };
 
-/** The body of `POST <base>/login`. */
-export type LoginRequest = {
+/**
+ * The body of `POST <base>/email-code`.
+ *
+ * The address and nothing else. There is no client here because nothing is
+ * issued yet — that belongs on the verify, which is where a session comes from.
+ */
+export type EmailCodeRequest = {
     emailAddress: string;
-    password: string;
+};
+
+/** The body of `POST <base>/email-code/verify`. */
+export type VerifyEmailCodeRequest = {
+    emailAddress: string;
+    /**
+     * The digits as typed. Spaces and hyphens are tolerated; leading zeros are
+     * part of the code and have to survive whatever you do to it, which is why
+     * it is a string and never a number.
+     */
+    code: string;
     /** Asks for the longer session lifetime. */
     remember?: boolean;
     /** `web`, `mobile` or `machine`. Anything else is read as `web`. */
@@ -156,48 +171,9 @@ export type RefreshRequest = {
     refreshToken: string;
 };
 
-/** The body of `POST <base>/password/reset`. */
-export type ResetRequest = {
-    emailAddress: string;
-};
-
-/** The body of `POST <base>/password/reset/confirm`. */
-export type ConfirmResetRequest = {
-    token: string;
-    newPassword: string;
-};
-
-/** The body of `POST <base>/password/change`. */
-export type ChangePasswordRequest = {
-    currentPassword: string;
-    newPassword: string;
-};
-
 /** The body of `POST <base>/email/verify`. */
 export type VerifyEmailRequest = {
     token: string;
-};
-
-/**
- * The body of `POST <base>/register`, where a stranger creates an account that
- * belongs to no tenant yet.
- */
-export type RegisterRequest = {
-    /**
-     * The identity. It is what a second registration with the same address
-     * collides with, and what verification is sent to.
-     */
-    emailAddress: string;
-    displayName: string;
-    password: string;
-    /**
-     * `web`, `mobile` or `machine`. Anything else is read as `web`.
-     *
-     * Here for the same reason it is on {@link LoginRequest}: a registration
-     * whose `OnRegistered` puts somebody in a tenant comes back with a session,
-     * and a session has to say what kind of client is holding it.
-     */
-    client?: string;
 };
 
 /** One session, as somebody reviewing it sees it. */
@@ -313,6 +289,11 @@ export type InvitationView = {
      * holds yet.
      */
     role: string;
+    /**
+     * The display name of whoever sent it, and absent when a key sent it or
+     * when that person has since been removed.
+     */
+    invitedBy?: string;
     createdAt: string;
     /**
      * When the token stops working. A listed invitation past it is history, not
@@ -338,7 +319,70 @@ export type InvitationToMeView = {
     tenantId: string;
     tenantName: string;
     role: string;
+    /**
+     * The display name of whoever sent it. Here for the same reason it is on
+     * {@link InvitationPreview}: a name is what makes "you have been invited"
+     * something somebody recognises rather than something they distrust.
+     */
+    invitedBy?: string;
     createdAt: string;
+    expiresAt: string;
+};
+
+/**
+ * The body of `POST <base>/invitations`.
+ *
+ * Who sent it is never in here. It comes from the caller's credential, because
+ * a body that could name the inviter is a body that could name somebody else.
+ */
+export type InviteRequest = {
+    emailAddress: string;
+    /**
+     * What to call them in this tenant. Empty falls back at accept time to the
+     * name the person already has.
+     */
+    displayName?: string;
+    /** `Basic` unless you say otherwise. */
+    role?: string;
+};
+
+/**
+ * What an invitation's link says, answered to whoever holds it and before
+ * anybody has proved anything.
+ *
+ * Deliberately not an {@link InvitationToMeView}. That one is answered to a
+ * caller who has proved they are the person invited; this one to a caller who
+ * has proved only that they hold a link. The difference is the address.
+ */
+export type InvitationPreview = {
+    /**
+     * What `POST <base>/me/invitations/accept` takes, for the case this exists
+     * to serve second: somebody already signed in who has just followed the
+     * link. Safe to hand out, because that endpoint refuses an invitation that
+     * is not the caller's own.
+     */
+    id: string;
+    tenantId: string;
+    /**
+     * The point of the whole endpoint. A page that cannot say where somebody
+     * has been invited is a page that looks like phishing.
+     */
+    tenantName: string;
+    /**
+     * Masked — `b***@school.example`. Enough to recognise which of your
+     * addresses this is, or to notice you are signed in as somebody else, and
+     * not enough for a forwarded link to confirm an address to whoever it was
+     * forwarded to.
+     */
+    emailAddress: string;
+    /** What accepting grants, so that accepting is a decision and not a button. */
+    role: string;
+    /**
+     * The display name of whoever sent it, and absent when a key sent it or
+     * when that person has since been removed — both of which a page has to
+     * render rather than fail on.
+     */
+    invitedBy?: string;
     expiresAt: string;
 };
 
@@ -348,11 +392,6 @@ export type InvitationToMeView = {
  */
 export type AcceptRequest = {
     token: string;
-    /**
-     * Only read when the person has none yet. Somebody joining a second tenant
-     * already has one, and it is not this endpoint's business.
-     */
-    password?: string;
     client?: string;
 };
 
@@ -382,12 +421,6 @@ export type ProvisionRequest = {
     /** `Basic` unless the caller says otherwise. */
     role?: string;
     timeZone?: string;
-    /**
-     * Sends a verification link so the person can set a password. A request
-     * rather than the default, because provisioning during an import of four
-     * thousand employees should not send four thousand emails.
-     */
-    invite?: boolean;
 };
 
 /**

@@ -123,13 +123,25 @@ type Handoff struct {
 	IdentityExpiresAt time.Time `json:"identityExpiresAt"`
 }
 
-// LoginRequest is the body of POST <base>/login.
-type LoginRequest struct {
+// EmailCodeRequest is the body of POST <base>/email-code.
+//
+// The address and nothing else. There is no client here because nothing is
+// issued yet — that belongs on the verify, which is where a session comes from.
+type EmailCodeRequest struct {
 	EmailAddress string `json:"emailAddress"`
-	Password     string `json:"password"`
-	// Remember asks for the longer session lifetime.
+}
+
+// VerifyEmailCodeRequest is the body of POST <base>/email-code/verify.
+type VerifyEmailCodeRequest struct {
+	EmailAddress string `json:"emailAddress"`
+	// Code is the digits as typed. Spaces and hyphens are tolerated; leading
+	// zeros are part of the code and have to survive whatever a client does to
+	// it, which is why it is a string and never a number.
+	Code string `json:"code"`
+
+	// Remember asks for a long session.
 	Remember bool `json:"remember"`
-	// Client is web, mobile or machine. Anything else is read as web.
+	// Client is what will hold the session: "web", "mobile" or "machine".
 	Client string `json:"client"`
 }
 
@@ -142,42 +154,9 @@ type RefreshRequest struct {
 	RefreshToken string `json:"refreshToken"`
 }
 
-// ResetRequest is the body of POST <base>/password/reset.
-type ResetRequest struct {
-	EmailAddress string `json:"emailAddress"`
-}
-
-// ConfirmResetRequest is the body of POST <base>/password/reset/confirm.
-type ConfirmResetRequest struct {
-	Token       string `json:"token"`
-	NewPassword string `json:"newPassword"`
-}
-
-// ChangePasswordRequest is the body of POST <base>/password/change.
-type ChangePasswordRequest struct {
-	CurrentPassword string `json:"currentPassword"`
-	NewPassword     string `json:"newPassword"`
-}
-
 // VerifyEmailRequest is the body of POST <base>/email/verify.
 type VerifyEmailRequest struct {
 	Token string `json:"token"`
-}
-
-// RegisterRequest is the body of POST <base>/register, where a stranger creates
-// an account that belongs to no tenant yet.
-type RegisterRequest struct {
-	// EmailAddress is the identity. It is what a second registration with the
-	// same address collides with, and what verification is sent to.
-	EmailAddress string `json:"emailAddress"`
-	DisplayName  string `json:"displayName"`
-	Password     string `json:"password"`
-	// Client is web, mobile or machine. Anything else is read as web.
-	//
-	// Here for the same reason it is on [LoginRequest]: a registration whose
-	// OnRegistered puts somebody in a tenant comes back with a session, and a
-	// session has to say what kind of client is holding it.
-	Client string `json:"client"`
 }
 
 // SessionView is one session, as somebody reviewing it sees it.
@@ -281,7 +260,10 @@ type InvitationView struct {
 	DisplayName  string    `json:"displayName"`
 	// Role is the role the invitation grants on acceptance, not one the invited
 	// person holds yet.
-	Role      string    `json:"role"`
+	Role string `json:"role"`
+	// InvitedBy is the display name of whoever sent it, and empty when a key
+	// sent it or when that person has since been removed.
+	InvitedBy string    `json:"invitedBy,omitempty"`
 	CreatedAt time.Time `json:"createdAt"`
 	// ExpiresAt is when the token stops working. A listed invitation past it is
 	// history, not something still waiting to be accepted.
@@ -302,18 +284,67 @@ type InvitationToMeView struct {
 	TenantID   uuid.UUID `json:"tenantId"`
 	TenantName string    `json:"tenantName"`
 	Role       string    `json:"role"`
-	CreatedAt  time.Time `json:"createdAt"`
-	ExpiresAt  time.Time `json:"expiresAt"`
+	// InvitedBy is the display name of whoever sent it. It is here for the same
+	// reason it is on the preview: a name is what makes "you have been invited"
+	// something somebody recognises rather than something they distrust.
+	InvitedBy string    `json:"invitedBy,omitempty"`
+	CreatedAt time.Time `json:"createdAt"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
+// InviteRequest is the body of POST <base>/invitations.
+//
+// Who sent it is never in here. It comes from the caller's claims, because a
+// body that could name the inviter is a body that could name somebody else.
+type InviteRequest struct {
+	EmailAddress string `json:"emailAddress"`
+	// DisplayName is what to call them in this tenant. Empty falls back at
+	// accept time to the name the person already has.
+	DisplayName string `json:"displayName"`
+	// Role is optional and defaults to Basic.
+	Role string `json:"role"`
+}
+
+// InvitationPreview is what an invitation's link says, answered to whoever holds
+// it and before anybody has proved anything.
+//
+// Deliberately not an [InvitationToMeView]. That one is answered to a caller who
+// has proved they are the person invited; this one to a caller who has proved
+// only that they hold a link. The difference is the address.
+type InvitationPreview struct {
+	// ID is what POST <base>/me/invitations/accept takes, for the case this
+	// exists to serve second: somebody already signed in who has just followed
+	// the link. It is safe to hand out because that endpoint refuses an
+	// invitation that is not the caller's own.
+	ID uuid.UUID `json:"id"`
+
+	TenantID uuid.UUID `json:"tenantId"`
+	// TenantName is the point of the whole endpoint. A page that cannot say
+	// where somebody has been invited is a page that looks like phishing.
+	TenantName string `json:"tenantName"`
+
+	// EmailAddress is masked — "b***@school.example". Enough to recognise which
+	// of your addresses this is, or to notice you are signed in as somebody
+	// else, and not enough for a forwarded link to confirm an address to
+	// whoever it was forwarded to.
+	EmailAddress string `json:"emailAddress"`
+
+	// Role is what accepting grants, so that accepting is an informed decision
+	// rather than a button.
+	Role string `json:"role"`
+	// InvitedBy is the display name of whoever sent it, and empty when a key
+	// sent it or when that person has since been removed — both of which a page
+	// has to render rather than fail on.
+	InvitedBy string `json:"invitedBy,omitempty"`
+
+	ExpiresAt time.Time `json:"expiresAt"`
 }
 
 // AcceptRequest is the body of POST <base>/invitations/accept, where the token
 // from the invitation mail is the credential.
 type AcceptRequest struct {
-	Token string `json:"token"`
-	// Password is only read when the person has none yet. Somebody joining a
-	// second tenant already has one, and it is not this endpoint's business.
-	Password string `json:"password"`
-	Client   string `json:"client"`
+	Token  string `json:"token"`
+	Client string `json:"client"`
 }
 
 // AcceptAsMeRequest is the body of POST <base>/me/invitations/accept, where the
@@ -340,11 +371,6 @@ type ProvisionRequest struct {
 	Role string `json:"role"`
 
 	TimeZone string `json:"timeZone"`
-
-	// Invite sends a verification link so the person can set a password. It is
-	// a request rather than the default, because provisioning during an import
-	// of four thousand employees should not send four thousand emails.
-	Invite bool `json:"invite"`
 }
 
 // AccountView is what a provisioning call comes back with. It is deliberately not

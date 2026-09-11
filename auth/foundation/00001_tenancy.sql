@@ -61,52 +61,39 @@ CREATE TABLE rig_identity (
 CREATE UNIQUE INDEX rig_identity_email_key
     ON rig_identity (lower(email_address)) WHERE deleted_at IS NULL;
 
-COMMENT ON TABLE  rig_identity IS 'A person who can sign in. Global: one address, one password, however many tenants.';
+COMMENT ON TABLE  rig_identity IS 'A person who can sign in. Global: one address, however many tenants.';
 COMMENT ON COLUMN rig_identity.email_address IS 'How the person signs in and where mail is sent. Unique across every tenant.';
 COMMENT ON COLUMN rig_identity.display_name IS 'What to call the person before any tenant has an opinion. An account may override it.';
 COMMENT ON COLUMN rig_identity.is_active IS 'Whether the person may sign in at all, anywhere. Refused with 403, not 401.';
 COMMENT ON COLUMN rig_identity.email_verified_at IS 'When the address was confirmed, or null if it has not been. It is the address that gets verified, so this is here and not on account.';
 
--- Credentials live apart from the identity so that reading one never reads a
--- password hash, and so that adding a second factor later is a new table rather
--- than a wider one.
-CREATE TABLE rig_identity_credential (
-    id                      uuid PRIMARY KEY,
-    identity_id             uuid NOT NULL REFERENCES rig_identity (id),
-
-    created_at              timestamptz NOT NULL DEFAULT now(),
-    updated_at              timestamptz,
-
-    password_hash           text NOT NULL,
-    algorithm               text NOT NULL,
-    params                  jsonb NOT NULL
-);
-
-CREATE UNIQUE INDEX rig_identity_credential_identity_id_key
-    ON rig_identity_credential (identity_id);
--- Finding every credential below the current cost has to be a query, or nobody
--- ever raises the cost.
-CREATE INDEX rig_identity_credential_algorithm_idx ON rig_identity_credential (algorithm);
-
-COMMENT ON TABLE  rig_identity_credential IS 'What a person signs in with. One row per identity, so one password covers every tenant.';
-COMMENT ON COLUMN rig_identity_credential.identity_id IS 'The person these credentials belong to.';
-COMMENT ON COLUMN rig_identity_credential.password_hash IS 'The PHC-encoded hash. It carries its own salt and cost.';
-COMMENT ON COLUMN rig_identity_credential.algorithm IS 'Hashing algorithm, so rows on an old one can be found without parsing.';
-COMMENT ON COLUMN rig_identity_credential.params IS 'Cost parameters, so rows below the current cost can be found without parsing.';
+-- The coarse level, for the decisions every product makes the same way: who may
+-- change billing, who may invite, who may only get on with their work. The role
+-- and permission tables are the fine grain — this is one column so that "is
+-- somebody an admin" does not need a join.
+-- Declared here rather than beside rig_account, which is what it is about,
+-- because an invitation carries the role somebody will have before the account
+-- that will hold it exists.
+CREATE TYPE rig_account_role_level AS ENUM ('Owner', 'Admin', 'Basic');
 
 CREATE TYPE rig_identity_verification_kind AS ENUM (
     'EmailVerification',
-    'PasswordReset',
+    'EmailCode',
     'Invitation'
 );
 
--- One table for every single-use link, because they are the same thing: a
+-- One table for every single-use secret, because they are the same thing: a
 -- hashed token with an expiry that can be consumed once.
--- Not tenant-scoped, and the column name says so: a reset link belongs to a
+-- Not tenant-scoped, and the column name says so: a sign-in code belongs to a
 -- person, not to one of the tenants they work in. It is invited_to_tenant_id
 -- rather than tenant_id because tenant_id has a meaning rig acts on — every
--- generated query filters by it — and a link that is deliberately global would
+-- generated query filters by it — and a row that is deliberately global would
 -- be a table where that filter is wrong.
+--
+-- An invitation is the one kind that is about a tenant, and it carries the whole
+-- of what accepting will create: the tenant, the role, the name, and who asked.
+-- That is what makes an invitation a pending membership rather than a mail about
+-- an account somebody already has — accepting is what writes the rig_account.
 CREATE TABLE rig_identity_verification (
     id                      uuid PRIMARY KEY,
     identity_id             uuid NOT NULL REFERENCES rig_identity (id),
@@ -118,38 +105,80 @@ CREATE TABLE rig_identity_verification (
     token_hash              bytea NOT NULL,
     expires_at              timestamptz NOT NULL,
     consumed_at             timestamptz,
-    revoked_at              timestamptz
+    revoked_at              timestamptz,
+
+    -- What a wrong guess costs. Only a code needs it: a 32-byte token cannot be
+    -- guessed, and six digits can, so a code has to die after a handful of
+    -- attempts rather than merely be slowed down by a rate limit.
+    attempts                integer NOT NULL DEFAULT 0,
+
+    -- The three an invitation carries and nothing else does. Null everywhere
+    -- else, and there is no CHECK tying them to the kind: the columns are
+    -- written by one code path and a constraint would only restate it.
+    invited_role            rig_account_role_level,
+    invited_display_name    text,
+    invited_by_account_id   uuid,
+    invited_by_api_key_id   uuid
 );
+
+-- What an invitation is, structurally rather than by convention: a row of this
+-- kind names a tenant and a role, and no other kind names either. It is what
+-- makes "an invitation with no tenant" unreachable rather than a branch in Go
+-- that can only report an internal error — the same move
+-- rig_account_person_has_identity makes below.
+ALTER TABLE rig_identity_verification
+    ADD CONSTRAINT rig_identity_verification_invitation_is_into_a_tenant
+        CHECK ((kind = 'Invitation') = (invited_to_tenant_id IS NOT NULL
+                                    AND invited_role IS NOT NULL));
 
 CREATE INDEX rig_identity_verification_identity_id_idx
     ON rig_identity_verification (identity_id);
 CREATE INDEX rig_identity_verification_invited_to_tenant_id_idx
     ON rig_identity_verification (invited_to_tenant_id, created_at DESC);
-CREATE UNIQUE INDEX rig_identity_verification_token_hash_key
-    ON rig_identity_verification (token_hash);
 
-COMMENT ON TABLE  rig_identity_verification IS 'A single-use link: email confirmation, password reset, or invitation.';
-COMMENT ON COLUMN rig_identity_verification.identity_id IS 'The person the link is for.';
-COMMENT ON COLUMN rig_identity_verification.invited_to_tenant_id IS 'The tenant an invitation is into, or null for a link that is about the person rather than one tenant.';
-COMMENT ON COLUMN rig_identity_verification.kind IS 'What the link is for.';
-COMMENT ON COLUMN rig_identity_verification.token_hash IS 'sha256 of the token. The token itself is only ever in the mail.';
-COMMENT ON COLUMN rig_identity_verification.expires_at IS 'When the link stops working.';
+-- Unique for everything with a real token, and deliberately not for a code.
+-- Six digits collide: two people signing in at the same minute can be sent the
+-- same code, and a unique index over the whole table would refuse the second
+-- one. A code is never looked up by its hash for the same reason — it is found
+-- by whose it is and then compared.
+CREATE UNIQUE INDEX rig_identity_verification_token_hash_key
+    ON rig_identity_verification (token_hash) WHERE kind <> 'EmailCode';
+
+-- One live invitation per person per tenant. This is what used to be
+-- rig_account_tenant_identity_key's job: inviting the same colleague twice used
+-- to conflict on the account it created up front, and there is no account to
+-- conflict on any more.
+--
+-- Expiry is deliberately not in the predicate. now() is not immutable so it
+-- cannot be indexed on, which means an expired invitation still holds the slot —
+-- and that is why inviting somebody revokes whatever is there rather than
+-- leaving this index to refuse.
+CREATE UNIQUE INDEX rig_identity_verification_live_invitation_key
+    ON rig_identity_verification (invited_to_tenant_id, identity_id)
+    WHERE kind = 'Invitation' AND consumed_at IS NULL AND revoked_at IS NULL;
+
+COMMENT ON TABLE  rig_identity_verification IS 'A single-use secret: email confirmation, sign-in code, or invitation.';
+COMMENT ON COLUMN rig_identity_verification.identity_id IS 'The person the row is for.';
+COMMENT ON COLUMN rig_identity_verification.invited_to_tenant_id IS 'The tenant an invitation is into, or null for a row that is about the person rather than one tenant.';
+COMMENT ON COLUMN rig_identity_verification.kind IS 'What the secret is for.';
+COMMENT ON COLUMN rig_identity_verification.token_hash IS 'sha256 of the token or code. The secret itself is only ever in the mail.';
+COMMENT ON COLUMN rig_identity_verification.expires_at IS 'When the secret stops working.';
 COMMENT ON COLUMN rig_identity_verification.consumed_at IS 'When it was used, or null while it is still usable.';
-COMMENT ON COLUMN rig_identity_verification.revoked_at IS 'When the link was cancelled, which is not the same as used: an invitation somebody withdrew and one somebody accepted are different things to find in an audit trail.';
+COMMENT ON COLUMN rig_identity_verification.revoked_at IS 'When it was cancelled, which is not the same as used: an invitation somebody withdrew and one somebody accepted are different things to find in an audit trail.';
+COMMENT ON COLUMN rig_identity_verification.attempts IS 'How many times a wrong code has been offered for this row. A code is dead once it reaches the configured ceiling.';
+COMMENT ON COLUMN rig_identity_verification.invited_role IS 'The role accepting an invitation will create the account with.';
+COMMENT ON COLUMN rig_identity_verification.invited_display_name IS 'The name accepting an invitation will create the account with.';
+COMMENT ON COLUMN rig_identity_verification.invited_by_account_id IS 'Who sent the invitation. It is what a landing page shows somebody who is not signed in yet, so that the mail is recognisable rather than phishing-shaped, and it becomes the created_by of the account accepting creates.';
+COMMENT ON COLUMN rig_identity_verification.invited_by_api_key_id IS 'The integration key that sent the invitation, when a machine did rather than a person.';
 
 -- The noun is account, not user: user is reserved in Postgres, and a table you
 -- have to quote in every hand-written query is a table nobody enjoys. The rig_
 -- prefix in front of it is what keeps the foundation's tables apart from yours.
 -- What an account is. A service account exists so that an integration's writes
--- are attributable to something that is not a person: it has no credential and
--- cannot sign in, and deactivating the human who created it does not stop it.
+-- are attributable to something that is not a person: it has no identity, so
+-- there is nothing to sign in as, and deactivating the human who created it does
+-- not stop it.
 CREATE TYPE rig_account_kind AS ENUM ('Person', 'Service');
-
--- The coarse level, for the decisions every product makes the same way: who may
--- change billing, who may invite, who may only get on with their work. The role
--- and permission tables are the fine grain — this is one column so that "is
--- somebody an admin" does not need a join.
-CREATE TYPE rig_account_role_level AS ENUM ('Owner', 'Admin', 'Basic');
 
 CREATE TABLE rig_account (
     id                      uuid PRIMARY KEY,
@@ -214,6 +243,16 @@ COMMENT ON COLUMN rig_account.email_address IS 'A copy of the identity''s addres
 COMMENT ON COLUMN rig_account.display_name IS 'What to call the person in this tenant.';
 COMMENT ON COLUMN rig_account.is_active IS 'Whether the account may be used. A disabled account is refused with 403, not 401.';
 
+-- An invitation's sender, added now that rig_account exists to reference. Same
+-- reason rig_identity's audit columns wait: the actor is an account, and
+-- rig_account is declared after the table that points at it.
+ALTER TABLE rig_identity_verification
+    ADD CONSTRAINT rig_identity_verification_invited_by_account_id_fkey
+        FOREIGN KEY (invited_by_account_id) REFERENCES rig_account (id);
+
+CREATE INDEX rig_identity_verification_invited_by_account_id_idx
+    ON rig_identity_verification (invited_by_account_id);
+
 -- rig_identity's own audit columns, added now that rig_account exists to reference.
 -- An identity is global but the person who invited it is not, so the actor is
 -- an account like everywhere else.
@@ -241,12 +280,14 @@ ALTER TABLE rig_identity
     DROP CONSTRAINT rig_identity_updated_by_account_id_fkey,
     DROP CONSTRAINT rig_identity_deleted_by_account_id_fkey;
 
+ALTER TABLE rig_identity_verification
+    DROP CONSTRAINT rig_identity_verification_invited_by_account_id_fkey;
+
 DROP TABLE rig_account;
-DROP TYPE rig_account_role_level;
 DROP TYPE rig_account_kind;
 DROP TABLE rig_identity_verification;
 DROP TYPE rig_identity_verification_kind;
-DROP TABLE rig_identity_credential;
+DROP TYPE rig_account_role_level;
 DROP TABLE rig_identity;
 DROP TABLE rig_tenant;
 

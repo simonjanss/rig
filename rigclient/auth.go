@@ -56,19 +56,42 @@ func withBearer(token string) CallOption {
 	}
 }
 
-// SignIn signs in and installs the resulting session on the client.
+// RequestEmailCode asks for a sign-in code to be mailed.
 //
-// It is [Auth.Login] plus the bookkeeping every caller would otherwise write:
-// from here on every request carries the access token, and the session refreshes
-// itself before that token expires.
+// It always succeeds, whether or not the address is registered: any difference
+// in the answer is the account enumeration this endpoint would otherwise be used
+// for. What it does report is a rate-limit refusal, which is about how often you
+// have asked rather than about the address.
+func (a *Auth) RequestEmailCode(
+	ctx context.Context, emailAddress string, opts ...CallOption,
+) error {
+	if !a.profile.HasEmailCode {
+		return notMounted("POST "+a.path("/email-code"),
+			"set auth.email_code.enabled in rig.yaml to open it")
+	}
+
+	opts = anon(opts)
+	return DoNoContent(ctx, a.rt, Op{
+		Name:   "authRequestEmailCode",
+		Method: http.MethodPost, Root: true, Path: a.path("/email-code"),
+		Body: authwire.EmailCodeRequest{EmailAddress: emailAddress},
+	}, opts...)
+}
+
+// SignIn types a mailed code back and installs the resulting session on the
+// client.
+//
+// It is [Auth.VerifyEmailCode] plus the bookkeeping every caller would otherwise
+// write: from here on every request carries the access token, and the session
+// refreshes itself before that token expires.
 //
 // A person who belongs to no tenant gets a response with no session in it and an
 // identity token instead — that is not a failure, it is the tenant picker. Check
 // SignInResponse.AccessToken before assuming there is one.
 func (a *Auth) SignIn(
-	ctx context.Context, in authwire.LoginRequest, opts ...CallOption,
+	ctx context.Context, in authwire.VerifyEmailCodeRequest, opts ...CallOption,
 ) (*authwire.SignInResponse, error) {
-	res, err := a.Login(ctx, in, opts...)
+	res, err := a.VerifyEmailCode(ctx, in, opts...)
 	if err != nil {
 		return nil, err
 	}
@@ -76,16 +99,22 @@ func (a *Auth) SignIn(
 	return res, nil
 }
 
-// Login signs in and returns the answer without installing anything.
-func (a *Auth) Login(
-	ctx context.Context, in authwire.LoginRequest, opts ...CallOption,
+// VerifyEmailCode signs in with a mailed code and returns the answer without
+// installing anything.
+func (a *Auth) VerifyEmailCode(
+	ctx context.Context, in authwire.VerifyEmailCodeRequest, opts ...CallOption,
 ) (*authwire.SignInResponse, error) {
+	if !a.profile.HasEmailCode {
+		return nil, notMounted("POST "+a.path("/email-code/verify"),
+			"set auth.email_code.enabled in rig.yaml to open it")
+	}
+
 	// Anonymous deliberately: presenting an expired token to the endpoint that
 	// would have replaced it is how a client gets stuck refusing to sign in.
 	opts = anon(opts)
 	return Do[authwire.SignInResponse](ctx, a.rt, Op{
-		Name:   "authLogin",
-		Method: http.MethodPost, Root: true, Path: a.path("/login"), Body: in,
+		Name:   "authVerifyEmailCode",
+		Method: http.MethodPost, Root: true, Path: a.path("/email-code/verify"), Body: in,
 	}, opts...)
 }
 
@@ -117,28 +146,6 @@ func (a *Auth) Refresh(
 	}, opts...)
 }
 
-// Register creates an account that belongs to no tenant yet, and installs the
-// session when the answer carries one.
-func (a *Auth) Register(
-	ctx context.Context, in authwire.RegisterRequest, opts ...CallOption,
-) (*authwire.SignInResponse, error) {
-	if !a.profile.HasRegistration {
-		return nil, notMounted("POST "+a.path("/register"),
-			"set auth.allow_registration in rig.yaml to open it")
-	}
-
-	opts = anon(opts)
-	res, err := Do[authwire.SignInResponse](ctx, a.rt, Op{
-		Name:   "authRegister",
-		Method: http.MethodPost, Root: true, Path: a.path("/register"), Body: in,
-	}, opts...)
-	if err != nil {
-		return nil, err
-	}
-	a.signedIn(res)
-	return res, nil
-}
-
 // Provision creates an account for somebody else, in the caller's tenant.
 func (a *Auth) Provision(
 	ctx context.Context, in authwire.ProvisionRequest, opts ...CallOption,
@@ -147,49 +154,6 @@ func (a *Auth) Provision(
 		Name:   "authProvision",
 		Method: http.MethodPost, Root: true, Path: a.path("/accounts"), Body: in,
 	}, opts...)
-}
-
-// RequestPasswordReset asks for a reset link.
-//
-// It always succeeds, whether or not the address is registered: any difference
-// in answer is the account enumeration this endpoint is most often used for.
-func (a *Auth) RequestPasswordReset(
-	ctx context.Context, emailAddress string, opts ...CallOption,
-) error {
-	opts = anon(opts)
-	return DoNoContent(ctx, a.rt, Op{
-		Name:   "authRequestPasswordReset",
-		Method: http.MethodPost, Root: true, Path: a.path("/password/reset"),
-		Body: authwire.ResetRequest{EmailAddress: emailAddress},
-	}, opts...)
-}
-
-// ConfirmPasswordReset sets a new password using the token from the mail.
-func (a *Auth) ConfirmPasswordReset(
-	ctx context.Context, token, newPassword string, opts ...CallOption,
-) error {
-	opts = anon(opts)
-	return DoNoContent(ctx, a.rt, Op{
-		Name:   "authConfirmPasswordReset",
-		Method: http.MethodPost, Root: true, Path: a.path("/password/reset/confirm"),
-		Body: authwire.ConfirmResetRequest{Token: token, NewPassword: newPassword},
-	}, opts...)
-}
-
-// ChangePassword changes the caller's own, and installs the pair that comes
-// back — the old one was revoked along with the password.
-func (a *Auth) ChangePassword(
-	ctx context.Context, in authwire.ChangePasswordRequest, opts ...CallOption,
-) (*authwire.TokenPair, error) {
-	pair, err := Do[authwire.TokenPair](ctx, a.rt, Op{
-		Name:   "authChangePassword",
-		Method: http.MethodPost, Root: true, Path: a.path("/password/change"), Body: in,
-	}, opts...)
-	if err != nil {
-		return nil, err
-	}
-	a.adopt(pair)
-	return pair, nil
 }
 
 // VerifyEmail confirms an address with the token from the mail.
@@ -331,6 +295,39 @@ func (a *Auth) AcceptInvitation(
 	}
 	a.install(pair)
 	return pair, nil
+}
+
+// Invite asks an address to join the caller's tenant, and creates nothing in it.
+//
+// Whoever holds the credential this call is made with is recorded as the
+// inviter, which is what a landing page shows somebody who has not signed in
+// yet. There is no way to say it was somebody else.
+func (a *Auth) Invite(
+	ctx context.Context, in authwire.InviteRequest, opts ...CallOption,
+) (*authwire.InvitationView, error) {
+	return Do[authwire.InvitationView](ctx, a.rt, Op{
+		Name:   "authInvite",
+		Method: http.MethodPost, Root: true, Path: a.path("/invitations"), Body: in,
+	}, opts...)
+}
+
+// PreviewInvitation says what an invitation link is for, without spending it.
+//
+// Anonymous, and the point of it: it is what a landing page calls with the token
+// out of its own URL, before anybody has signed in, so that it can say who
+// invited you and where instead of showing a bare sign-in box.
+//
+// The address that comes back is masked. Every way the token can be wrong — not
+// found, already used, withdrawn, expired — is the same 404.
+func (a *Auth) PreviewInvitation(
+	ctx context.Context, token string, opts ...CallOption,
+) (*authwire.InvitationPreview, error) {
+	opts = anon(opts)
+	return Do[authwire.InvitationPreview](ctx, a.rt, Op{
+		Name:   "authPreviewInvitation",
+		Method: http.MethodGet, Root: true, Path: a.path("/invitations/preview"),
+		Query: url.Values{"token": {token}},
+	}, opts...)
 }
 
 // Invitations lists the live invitations into the caller's tenant.

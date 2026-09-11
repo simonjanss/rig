@@ -2,7 +2,6 @@ package authpg
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -262,73 +261,22 @@ func scanAccount(rows pgx.Rows) (*account.Account, error) {
 	return &a, nil
 }
 
-// Credential implements [account.Store].
-func (s *AccountStore) Credential(ctx context.Context, identityID uuid.UUID) (*account.Credential, error) {
-	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
-		SELECT id, identity_id, password_hash, algorithm, params, created_at, updated_at
-		FROM rig_identity_credential WHERE identity_id = $1`, identityID)
-	if err != nil {
-		return nil, fmt.Errorf("authpg: read credential: %w", err)
-	}
-	defer rows.Close()
-
-	if !rows.Next() {
-		// Somebody with no credential is not broken: a person who only ever
-		// signed in through a provider has none.
-		return nil, rows.Err()
-	}
-
-	var (
-		c   account.Credential
-		raw []byte
-	)
-	if err := rows.Scan(&c.ID, &c.IdentityID, &c.PasswordHash,
-		&c.Algorithm, &raw, &c.CreatedAt, &c.UpdatedAt); err != nil {
-		return nil, fmt.Errorf("authpg: scan credential: %w", err)
-	}
-	if err := json.Unmarshal(raw, &c.Params); err != nil {
-		return nil, fmt.Errorf("authpg: read credential parameters: %w", err)
-	}
-	c.CreatedAt = dbx.UTC(c.CreatedAt)
-	c.UpdatedAt = dbx.UTCPtr(c.UpdatedAt)
-	return &c, nil
-}
-
-// SaveCredential implements [account.Store].
-//
-// One credential per identity, so a change is an upsert rather than a delete and
-// an insert: the second form has a window in which the person has no password
-// at all, and a crash inside it locks somebody out permanently.
-func (s *AccountStore) SaveCredential(ctx context.Context, c *account.Credential) error {
-	params, err := json.Marshal(c.Params)
-	if err != nil {
-		return fmt.Errorf("authpg: encode credential parameters: %w", err)
-	}
-
-	_, err = dbx.ConnFor(ctx, s.db).Exec(ctx, `
-		INSERT INTO rig_identity_credential
-			(id, identity_id, password_hash, algorithm, params, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6)
-		ON CONFLICT (identity_id) DO UPDATE SET
-			password_hash = excluded.password_hash,
-			algorithm     = excluded.algorithm,
-			params        = excluded.params,
-			updated_at    = excluded.created_at`,
-		c.ID, c.IdentityID, c.PasswordHash, c.Algorithm, params, c.CreatedAt)
-	if err != nil {
-		return fmt.Errorf("authpg: save credential: %w", err)
-	}
-	return nil
-}
-
 // CreateVerification implements [account.Store].
 func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verification) error {
+	var role *string
+	if v.InvitedRole != nil {
+		r := string(*v.InvitedRole)
+		role = &r
+	}
+
 	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
 		INSERT INTO rig_identity_verification
-			(id, identity_id, invited_to_tenant_id, kind, token_hash, created_at, expires_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)`,
+			(id, identity_id, invited_to_tenant_id, kind, token_hash, created_at, expires_at,
+			 invited_role, invited_display_name, invited_by_account_id, invited_by_api_key_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
 		v.ID, v.IdentityID, v.InvitedToTenantID, string(v.Kind), v.TokenHash,
-		v.CreatedAt, v.ExpiresAt)
+		v.CreatedAt, v.ExpiresAt,
+		role, dbx.Null(v.InvitedDisplayName), v.InvitedByAccountID, v.InvitedByAPIKeyID)
 	if err != nil {
 		return fmt.Errorf("authpg: create verification: %w", err)
 	}
@@ -337,26 +285,72 @@ func (s *AccountStore) CreateVerification(ctx context.Context, v *account.Verifi
 
 // PendingInvitations implements [account.Store].
 //
-// Live means all four conditions at once: not consumed, not revoked, not expired,
-// and for an account that is still there. The join is what makes it useful — an
-// interface listing invitations wants to say who, not which token hash.
+// Live means not consumed, not revoked and not expired. It used to also mean
+// "and for an account that is still there", because an account existed from the
+// moment somebody was invited; there is none now until they accept, which is
+// what makes this a list of people who are *not* in the tenant.
 func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUID) ([]account.Invitation, error) {
+	return s.invitations(ctx,
+		`v.invited_to_tenant_id = $1 AND v.expires_at > now()`, tenantID)
+}
+
+// InvitationsForIdentity implements [account.Store].
+//
+// No tenant predicate, deliberately, and it is the one query in this package
+// where that is the whole point: somebody who belongs to no tenant is asking
+// which ones have asked for them. Scoping it by tenant would be scoping it to a
+// tenant they are not in yet.
+func (s *AccountStore) InvitationsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Invitation, error) {
+	return s.invitations(ctx, `v.identity_id = $1 AND v.expires_at > now()`, identityID)
+}
+
+// InvitationByID implements [account.Store].
+func (s *AccountStore) InvitationByID(ctx context.Context, id uuid.UUID) (*account.Invitation, error) {
+	return s.oneInvitation(ctx, `v.id = $1`, id)
+}
+
+// InvitationByToken implements [account.Store].
+func (s *AccountStore) InvitationByToken(ctx context.Context, hash []byte) (*account.Invitation, error) {
+	return s.oneInvitation(ctx, `v.token_hash = $1`, hash)
+}
+
+// oneInvitation is [AccountStore.invitations] where at most one row can match.
+//
+// Neither of its callers filters on expiry, and that is deliberate: the service
+// compares against its own clock — which a test can move — and a second opinion
+// in SQL is how a double and the database come apart about the property under
+// test.
+func (s *AccountStore) oneInvitation(ctx context.Context, where string, args ...any) (*account.Invitation, error) {
+	out, err := s.invitations(ctx, where, args...)
+	if err != nil || len(out) == 0 {
+		return nil, err
+	}
+	return &out[0], nil
+}
+
+// invitations is the shared read behind every invitation query.
+//
+// The joins are what make a row useful — an interface listing invitations wants
+// to say who and where, not which token hash. The inviter is a LEFT JOIN because
+// two ordinary things make it absent: a key sent the invitation, or the person
+// who sent it has since been removed. Either way the row still has to render.
+func (s *AccountStore) invitations(ctx context.Context, where string, args ...any) ([]account.Invitation, error) {
 	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
-		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
-		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
+		SELECT v.id, v.identity_id, v.invited_to_tenant_id, rig_tenant.name,
+		       rig_identity.email_address,
+		       coalesce(nullif(v.invited_display_name, ''), rig_identity.display_name),
+		       v.invited_role, v.invited_by_account_id, inviter.display_name,
 		       v.created_at, v.expires_at
 		  FROM rig_identity_verification v
 		  JOIN rig_identity ON rig_identity.id = v.identity_id
 		  JOIN rig_tenant   ON rig_tenant.id = v.invited_to_tenant_id
-		  JOIN rig_account  ON rig_account.identity_id = v.identity_id
-		                    AND rig_account.tenant_id = v.invited_to_tenant_id
-		 WHERE v.invited_to_tenant_id = $1
-		   AND v.kind = 'Invitation'
+		  LEFT JOIN rig_account inviter ON inviter.id = v.invited_by_account_id
+		                               AND inviter.deleted_at IS NULL
+		 WHERE v.kind = 'Invitation'
 		   AND v.consumed_at IS NULL
 		   AND v.revoked_at IS NULL
-		   AND v.expires_at > now()
-		   AND rig_account.deleted_at IS NULL
-		 ORDER BY v.created_at DESC`, tenantID)
+		   AND `+where+`
+		 ORDER BY v.created_at DESC`, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read invitations: %w", err)
 	}
@@ -364,12 +358,17 @@ func (s *AccountStore) PendingInvitations(ctx context.Context, tenantID uuid.UUI
 
 	var out []account.Invitation
 	for rows.Next() {
-		var i account.Invitation
-		if err := rows.Scan(&i.ID, &i.IdentityID, &i.AccountID, &i.TenantID, &i.TenantName,
+		var (
+			i  account.Invitation
+			by *string
+		)
+		if err := rows.Scan(&i.ID, &i.IdentityID, &i.TenantID, &i.TenantName,
 			&i.EmailAddress, &i.DisplayName, &i.Role,
+			&i.InvitedByAccountID, &by,
 			&i.CreatedAt, &i.ExpiresAt); err != nil {
 			return nil, fmt.Errorf("authpg: scan invitation: %w", err)
 		}
+		i.InvitedByName = dbx.Deref(by)
 		i.CreatedAt = dbx.UTC(i.CreatedAt)
 		i.ExpiresAt = dbx.UTC(i.ExpiresAt)
 		out = append(out, i)
@@ -392,23 +391,6 @@ func (s *AccountStore) RevokeVerification(ctx context.Context, id uuid.UUID, at 
 	return tag.RowsAffected() == 1, nil
 }
 
-// SoftDeleteAccount implements [account.Store].
-//
-// Soft, because the foundation says the table is: account carries deleted_at and
-// a restore window, so a withdrawal that turns out to be a mistake is one update
-// away from being undone.
-func (s *AccountStore) SoftDeleteAccount(ctx context.Context, in account.DeleteAccountInput) error {
-	_, err := dbx.ConnFor(ctx, s.db).Exec(ctx, `
-		UPDATE rig_account
-		   SET deleted_at = $3, deleted_by_account_id = $4, deleted_by_api_key_id = $5
-		 WHERE tenant_id = $1 AND id = $2 AND deleted_at IS NULL`,
-		in.TenantID, in.AccountID, in.At, in.ByAccountID, in.ByAPIKeyID)
-	if err != nil {
-		return fmt.Errorf("authpg: delete account: %w", err)
-	}
-	return nil
-}
-
 // VerificationByHash implements [account.Store].
 func (s *AccountStore) VerificationByHash(ctx context.Context, hash []byte) (*account.Verification, error) {
 	return s.verification(ctx, `token_hash = $1`, hash)
@@ -419,11 +401,13 @@ func (s *AccountStore) VerificationByID(ctx context.Context, id uuid.UUID) (*acc
 	return s.verification(ctx, `id = $1`, id)
 }
 
-func (s *AccountStore) verification(ctx context.Context, where string, arg any) (*account.Verification, error) {
+func (s *AccountStore) verification(ctx context.Context, where string, args ...any) (*account.Verification, error) {
 	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
 		SELECT id, identity_id, invited_to_tenant_id, kind, token_hash,
-		       created_at, expires_at, consumed_at, revoked_at
-		FROM rig_identity_verification WHERE `+where, arg)
+		       created_at, expires_at, consumed_at, revoked_at, attempts,
+		       invited_role, invited_display_name, invited_by_account_id,
+		       invited_by_api_key_id
+		FROM rig_identity_verification WHERE `+where, args...)
 	if err != nil {
 		return nil, fmt.Errorf("authpg: read verification: %w", err)
 	}
@@ -436,17 +420,82 @@ func (s *AccountStore) verification(ctx context.Context, where string, arg any) 
 	var (
 		v    account.Verification
 		kind string
+		role *string
+		name *string
 	)
 	if err := rows.Scan(&v.ID, &v.IdentityID, &v.InvitedToTenantID, &kind, &v.TokenHash,
-		&v.CreatedAt, &v.ExpiresAt, &v.ConsumedAt, &v.RevokedAt); err != nil {
+		&v.CreatedAt, &v.ExpiresAt, &v.ConsumedAt, &v.RevokedAt, &v.Attempts,
+		&role, &name, &v.InvitedByAccountID, &v.InvitedByAPIKeyID); err != nil {
 		return nil, fmt.Errorf("authpg: scan verification: %w", err)
 	}
 	v.Kind = account.VerificationKind(kind)
+	if role != nil {
+		r := account.Role(*role)
+		v.InvitedRole = &r
+	}
+	if name != nil {
+		v.InvitedDisplayName = *name
+	}
 	v.CreatedAt = dbx.UTC(v.CreatedAt)
 	v.ExpiresAt = dbx.UTC(v.ExpiresAt)
 	v.ConsumedAt = dbx.UTCPtr(v.ConsumedAt)
 	v.RevokedAt = dbx.UTCPtr(v.RevokedAt)
 	return &v, nil
+}
+
+// LiveVerification implements [account.Store].
+func (s *AccountStore) LiveVerification(
+	ctx context.Context, identityID uuid.UUID, kind account.VerificationKind,
+) (*account.Verification, error) {
+	// Newest first and one row, so that a second code asked for while the first
+	// was still live is the one that works — which is what [account.Service]
+	// promises, and the reason it revokes the older row rather than relying on
+	// this ordering alone.
+	return s.verification(ctx,
+		`identity_id = $1 AND kind = $2
+		   AND consumed_at IS NULL AND revoked_at IS NULL AND expires_at > now()
+		 ORDER BY created_at DESC LIMIT 1`, identityID, string(kind))
+}
+
+// ChargeVerificationAttempt implements [account.Store].
+//
+// One statement, which is the whole requirement. A read followed by a write is a
+// window two concurrent guesses both fit through, and against a six-digit secret
+// that window is free attempts.
+//
+// The revocation is in the same UPDATE rather than a second one, so a code that
+// has just run out of attempts is dead by the time the row is unlocked. Revoked
+// rather than a state of its own: account.Verification.Usable already refuses a
+// revoked row and so does the mail queue's rotation, so nothing else has to
+// learn that a ceiling exists.
+func (s *AccountStore) ChargeVerificationAttempt(
+	ctx context.Context, id uuid.UUID, max int, at time.Time,
+) (int, bool, error) {
+	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
+		UPDATE rig_identity_verification
+		   SET attempts   = attempts + 1,
+		       revoked_at = CASE WHEN attempts + 1 >= $2 THEN $3 ELSE revoked_at END
+		 WHERE id = $1 AND consumed_at IS NULL AND revoked_at IS NULL
+		RETURNING attempts, revoked_at IS NOT NULL`, id, max, at)
+	if err != nil {
+		return 0, false, fmt.Errorf("authpg: charge verification attempt: %w", err)
+	}
+	defer rows.Close()
+
+	if !rows.Next() {
+		// Consumed or revoked between the read that found it and this write. It
+		// is dead either way, which is what the caller needs to know.
+		return 0, true, rows.Err()
+	}
+
+	var (
+		attempts int
+		dead     bool
+	)
+	if err := rows.Scan(&attempts, &dead); err != nil {
+		return 0, false, fmt.Errorf("authpg: scan verification attempt: %w", err)
+	}
+	return attempts, dead, nil
 }
 
 // ConsumeVerification implements [account.Store].
@@ -467,49 +516,6 @@ func (s *AccountStore) ConsumeVerification(ctx context.Context, id uuid.UUID, at
 // InTx implements [account.Store].
 func (s *AccountStore) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
 	return dbx.InTx(ctx, s.tx, func(ctx context.Context, _ dbx.Conn) error { return fn(ctx) })
-}
-
-// InvitationsForIdentity implements [account.Store].
-//
-// No tenant predicate, deliberately, and it is the one query in this package
-// where that is the whole point: somebody who belongs to no tenant is asking
-// which ones have asked for them. Scoping it by tenant would be scoping it to a
-// tenant they are not in yet.
-func (s *AccountStore) InvitationsForIdentity(ctx context.Context, identityID uuid.UUID) ([]account.Invitation, error) {
-	rows, err := dbx.ConnFor(ctx, s.db).Query(ctx, `
-		SELECT v.id, v.identity_id, rig_account.id, v.invited_to_tenant_id, rig_tenant.name,
-		       rig_identity.email_address, rig_identity.display_name, rig_account.role,
-		       v.created_at, v.expires_at
-		  FROM rig_identity_verification v
-		  JOIN rig_identity ON rig_identity.id = v.identity_id
-		  JOIN rig_tenant   ON rig_tenant.id = v.invited_to_tenant_id
-		  JOIN rig_account  ON rig_account.identity_id = v.identity_id
-		                    AND rig_account.tenant_id = v.invited_to_tenant_id
-		 WHERE v.identity_id = $1
-		   AND v.kind = 'Invitation'
-		   AND v.consumed_at IS NULL
-		   AND v.revoked_at IS NULL
-		   AND v.expires_at > now()
-		   AND rig_account.deleted_at IS NULL
-		 ORDER BY v.created_at DESC`, identityID)
-	if err != nil {
-		return nil, fmt.Errorf("authpg: read invitations for identity: %w", err)
-	}
-	defer rows.Close()
-
-	var out []account.Invitation
-	for rows.Next() {
-		var i account.Invitation
-		if err := rows.Scan(&i.ID, &i.IdentityID, &i.AccountID, &i.TenantID, &i.TenantName,
-			&i.EmailAddress, &i.DisplayName, &i.Role,
-			&i.CreatedAt, &i.ExpiresAt); err != nil {
-			return nil, fmt.Errorf("authpg: scan invitation: %w", err)
-		}
-		i.CreatedAt = dbx.UTC(i.CreatedAt)
-		i.ExpiresAt = dbx.UTC(i.ExpiresAt)
-		out = append(out, i)
-	}
-	return out, rows.Err()
 }
 
 // InsertTenant implements [account.Store].

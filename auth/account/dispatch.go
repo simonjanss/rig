@@ -125,17 +125,18 @@ func (s *Service) deliverOne(ctx context.Context, pass context.Context, d Delive
 		return s.skipMail(ctx, d, errIdentityInactive, report)
 	}
 
-	var acct *Account
+	// An invitation's mail has to name the tenant, and the row is where that
+	// comes from now. It used to read the account, which was possible only
+	// because one had been created up front; there is none until somebody
+	// accepts.
+	var inv *Invitation
 	if d.Kind == KindInvitation {
-		if v.InvitedToTenantID == nil {
-			return s.skipMail(ctx, d, errVerificationGone, report)
-		}
-		acct, err = s.cfg.Store.AccountForIdentity(ctx, *v.InvitedToTenantID, ident.ID)
+		inv, err = s.cfg.Store.InvitationByID(ctx, v.ID)
 		if err != nil {
 			return err
 		}
-		if acct == nil || !acct.IsActive {
-			return s.skipMail(ctx, d, errIdentityInactive, report)
+		if inv == nil {
+			return s.skipMail(ctx, d, errLinkSettled, report)
 		}
 	}
 
@@ -143,7 +144,7 @@ func (s *Service) deliverOne(ctx context.Context, pass context.Context, d Delive
 	// here rather than from the request, which is the right answer and a small
 	// improvement on the inline path: a link that waited out an outage is not a
 	// link that spent its whole window waiting.
-	token, hash, err := s.mintToken()
+	token, hash, err := s.mintSecret(d.Kind, ident)
 	if err != nil {
 		return err
 	}
@@ -162,7 +163,7 @@ func (s *Service) deliverOne(ctx context.Context, pass context.Context, d Delive
 	// a lease: a provider that hangs holds nothing but its own lease, and the
 	// pool is untouched.
 	send, endSend := context.WithTimeout(pass, s.mail.SendTimeout)
-	sendErr := s.notify(send, d.Kind, ident, acct, token)
+	sendErr := s.notify(send, d.Kind, ident, inv, token)
 	endSend()
 
 	// Marked on ctx and not on pass, for notify's reason: the pass deadline is
@@ -172,14 +173,14 @@ func (s *Service) deliverOne(ctx context.Context, pass context.Context, d Delive
 }
 
 // notify is the one place the three Notifier methods are told apart.
-func (s *Service) notify(ctx context.Context, kind VerificationKind, ident *Identity, acct *Account, token string) error {
+func (s *Service) notify(ctx context.Context, kind VerificationKind, ident *Identity, inv *Invitation, token string) error {
 	switch kind {
-	case KindPasswordReset:
-		return s.cfg.Notifier.SendPasswordReset(ctx, ident, token)
+	case KindEmailCode:
+		return s.cfg.Notifier.SendEmailCode(ctx, ident, token)
 	case KindEmailVerification:
 		return s.cfg.Notifier.SendEmailVerification(ctx, ident, token)
 	case KindInvitation:
-		return s.cfg.Notifier.SendInvitation(ctx, ident, acct, token)
+		return s.cfg.Notifier.SendInvitation(ctx, ident, inv, token)
 	default:
 		// A kind this build does not know, which is a queued row written by a
 		// newer one. Permanent, because another pass will not know it either.
@@ -187,12 +188,12 @@ func (s *Service) notify(ctx context.Context, kind VerificationKind, ident *Iden
 	}
 }
 
-// ttlFor is how long the link this delivery carries is good for, read at send
+// ttlFor is how long the secret this delivery carries is good for, read at send
 // time so that a configuration change reaches rows that are already queued.
 func (s *Service) ttlFor(kind VerificationKind) time.Duration {
 	switch kind {
-	case KindPasswordReset:
-		return s.cfg.ResetTTL
+	case KindEmailCode:
+		return s.cfg.EmailCode.TTL
 	case KindEmailVerification:
 		return s.cfg.VerificationTTL
 	default:

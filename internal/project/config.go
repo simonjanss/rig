@@ -93,19 +93,10 @@ type Auth struct {
 	// <base>/oauth/{provider}/start.
 	BasePath string `yaml:"base_path,omitempty" json:"base_path,omitempty" jsonschema_description:"Prefix the authentication endpoints sit under. Defaults to /auth."`
 
-	Tenant   AuthTenant   `yaml:"tenant,omitempty" json:"tenant,omitempty" jsonschema_description:"How a request names the tenant it is for."`
-	Session  AuthSession  `yaml:"session,omitempty" json:"session,omitempty" jsonschema_description:"How long the credentials somebody holds stay valid."`
-	Password AuthPassword `yaml:"password,omitempty" json:"password,omitempty" jsonschema_description:"What a new password must satisfy."`
-	Limits   AuthLimits   `yaml:"limits,omitempty" json:"limits,omitempty" jsonschema_description:"Rate limits, counted in the database so replicas cannot disagree."`
-
-	// AllowRegistration mounts POST <base>/register, where a stranger creates an
-	// account with no tenant and lands in the tenant picker.
-	//
-	// Off by default. Whether anybody may sign themselves up is a product
-	// decision — invite-only and open registration are both ordinary — and off
-	// means the route does not exist rather than answering 403 to something
-	// probeable.
-	AllowRegistration bool `yaml:"allow_registration,omitempty" json:"allow_registration,omitempty" jsonschema_description:"Mount the registration endpoint, where a stranger creates an account. Off means the route does not exist."`
+	Tenant    AuthTenant    `yaml:"tenant,omitempty" json:"tenant,omitempty" jsonschema_description:"How a request names the tenant it is for."`
+	Session   AuthSession   `yaml:"session,omitempty" json:"session,omitempty" jsonschema_description:"How long the credentials somebody holds stay valid."`
+	EmailCode AuthEmailCode `yaml:"email_code,omitempty" json:"email_code,omitempty" jsonschema_description:"Sign-in by a short code mailed to the address. The way in for anybody with no account at a configured provider."`
+	Limits    AuthLimits    `yaml:"limits,omitempty" json:"limits,omitempty" jsonschema_description:"Rate limits, counted in the database so replicas cannot disagree."`
 
 	// AllowTenantCreation mounts POST <base>/tenants, where somebody signed in
 	// makes one and becomes its Owner. The policy — who may, what a name may be,
@@ -229,46 +220,67 @@ type AuthSession struct {
 	IdentityTTL Duration `yaml:"identity_ttl,omitempty" json:"identity_ttl,omitempty" jsonschema_description:"Lifetime of the tenant-less credential held between signing in and picking a tenant. Defaults to 30m."`
 }
 
-// AuthPassword is what a new password must satisfy.
+// AuthEmailCode is the mailed-code sign-in: rig sends a short numeric code to
+// an address and somebody types it back.
 //
-// There are no composition rules, and that is the recommendation rather than an
-// omission: demanding an uppercase letter, a digit and a symbol pushes people
-// toward Password1! and a sticky note. Length and a breach check are what help.
-type AuthPassword struct {
-	// MinLength is in characters, not bytes. Default 12.
-	MinLength int `yaml:"min_length,omitempty" json:"min_length,omitempty" jsonschema:"minimum=8" jsonschema_description:"Minimum password length in characters. Defaults to 12."`
-	// MaxLength bounds the work rather than the strength: argon2id over a
-	// ten-megabyte password is a denial of service anybody can send. Default 1024.
-	MaxLength int `yaml:"max_length,omitempty" json:"max_length,omitempty" jsonschema_description:"Maximum password length in characters. This bounds hashing work, not strength. Defaults to 1024."`
+// It is the way in for anybody with no account at a configured provider, and in
+// a deployment with no provider it is the only one. Off by default, because
+// whether a product wants it is a decision and because it cannot work without a
+// Notifier — which is Go, not YAML, so rig refuses the combination at startup
+// rather than here.
+type AuthEmailCode struct {
+	// Enabled mounts POST <base>/email-code and POST <base>/email-code/verify.
+	// Off means the routes do not exist rather than answering 403, so there is
+	// nothing to probe.
+	Enabled bool `yaml:"enabled,omitempty" json:"enabled,omitempty" jsonschema_description:"Mount the mailed-code sign-in. Off means the routes do not exist."`
 
-	// BreachCheck rejects passwords known to have leaked, against Have I Been
-	// Pwned's range API.
+	// Length is how many digits. Default 6.
+	Length int `yaml:"length,omitempty" json:"length,omitempty" jsonschema:"minimum=6,maximum=10" jsonschema_description:"How many digits a sign-in code has. Defaults to 6. Fewer is guessable whatever the attempt ceiling; more is a token, which belongs in a link."`
+	// TTL is how long a code lasts. Default 10m.
+	TTL Duration `yaml:"ttl,omitempty" json:"ttl,omitempty" jsonschema_description:"How long a sign-in code lasts, for example 10m. Defaults to 10m."`
+	// MaxAttempts is how many wrong guesses kill a code. Default 5.
 	//
-	// Off by default because it talks to a third party. The password never leaves
-	// the process — five hex digits of its SHA-1 do — and a checker that cannot
-	// reach its source fails open, because a third party's outage should not stop
-	// somebody changing their password.
-	BreachCheck bool `yaml:"breach_check,omitempty" json:"breach_check,omitempty" jsonschema_description:"Reject passwords that appear in Have I Been Pwned. Only a hash prefix is sent, and the check fails open."`
+	// A ceiling on one code, not a rate limit on an address, and the two are not
+	// substitutes: a limit counts failures over a rolling window, so a fresh
+	// code would arrive with the old code's failures still against it and five
+	// mistypes would lock the address rather than killing one code.
+	MaxAttempts int `yaml:"max_attempts,omitempty" json:"max_attempts,omitempty" jsonschema:"minimum=1" jsonschema_description:"How many wrong guesses kill one code. Defaults to 5. This is a ceiling on the code, not a rate limit on the address."`
+
+	// AllowProvisioning sends a code to an address rig has never seen, creating
+	// the person when the code is asked for.
+	//
+	// Off by default, which makes the deployment invite-only: a code goes only
+	// to an address that already has an identity. On, it is self-registration,
+	// and `auth.oauth.allow_provisioning` is the same decision for the other
+	// door.
+	AllowProvisioning bool `yaml:"allow_provisioning,omitempty" json:"allow_provisioning,omitempty" jsonschema_description:"Send a code to an address rig has never seen, creating the person. Off means a code only goes to an address that already has an identity."`
 }
 
 // AuthLimits are the rate limits. Zero in any of them means rig's own default.
 //
 // They are counted in the database rather than in memory, so two replicas cannot
-// disagree about how many times a password has been tried and a restart does not
+// disagree about how many times a code has been tried and a restart does not
 // clear somebody's lockout.
 type AuthLimits struct {
-	// LoginByEmail locks one account after a handful of wrong passwords.
+	// LoginByEmail locks one account after a handful of wrong codes.
 	// Default 5 per 15m, cleared by a success.
 	LoginByEmail AuthLimit `yaml:"login_by_email,omitempty" json:"login_by_email,omitempty" jsonschema_description:"Failed sign-ins per address before the account is locked out. Defaults to 5 per 15m."`
 	// LoginByIP throttles one source spraying many accounts. Default 50 per 15m.
 	//
 	// Deliberately looser than the address limit and deliberately not cleared by
 	// a success: an email-only limit lets an attacker lock a victim out on
-	// purpose, and an IP-only limit lets a botnet spray one password everywhere.
+	// purpose, and an IP-only limit lets a botnet spray one guess everywhere.
 	LoginByIP AuthLimit `yaml:"login_by_ip,omitempty" json:"login_by_ip,omitempty" jsonschema_description:"Failed sign-ins per source address. Looser than the per-address limit so an office behind one NAT does not trip it. Defaults to 50 per 15m."`
 
-	// PasswordReset bounds reset requests per address. Default 5 per 1h.
-	PasswordReset AuthLimit `yaml:"password_reset,omitempty" json:"password_reset,omitempty" jsonschema_description:"Password-reset requests per address. Defaults to 5 per 1h."`
+	// EmailCodeRequest bounds code requests per address. Default 5 per 1h.
+	EmailCodeRequest AuthLimit `yaml:"email_code_request,omitempty" json:"email_code_request,omitempty" jsonschema_description:"Sign-in codes mailed per address. Defaults to 5 per 1h."`
+	// EmailCodeByIP bounds code requests per source, across every address.
+	// Default 20 per 1h.
+	//
+	// The limit that matters most when auth.email_code.allow_provisioning is
+	// set: asking for a code then writes a person, and without this one script
+	// makes ten thousand identities.
+	EmailCodeByIP AuthLimit `yaml:"email_code_ip,omitempty" json:"email_code_ip,omitempty" jsonschema_description:"Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 20 per 1h."`
 	// VerificationResend bounds verification mail per address. Default 5 per 1h.
 	VerificationResend AuthLimit `yaml:"verification_resend,omitempty" json:"verification_resend,omitempty" jsonschema_description:"Verification mails per address. Defaults to 5 per 1h."`
 	// Refresh bounds one session's rotations. Default 60 per 1m: a client
@@ -276,6 +288,12 @@ type AuthLimits struct {
 	Refresh AuthLimit `yaml:"refresh,omitempty" json:"refresh,omitempty" jsonschema_description:"Token rotations per session. A client refreshing this often is looping, not working. Defaults to 60 per 1m."`
 	// APIKeyFailures bounds wrong keys per key. Default 20 per 1m.
 	APIKeyFailures AuthLimit `yaml:"api_key_failures,omitempty" json:"api_key_failures,omitempty" jsonschema_description:"Failed API-key authentications per key. Defaults to 20 per 1m."`
+	// InvitationPreview bounds reading an invitation link per source. Default
+	// 60 per 1h.
+	//
+	// The one unauthenticated endpoint keyed by a secret rather than by an
+	// address, so what this bounds is one source walking the token space.
+	InvitationPreview AuthLimit `yaml:"invitation_preview,omitempty" json:"invitation_preview,omitempty" jsonschema_description:"Invitation-link previews per source address. Defaults to 60 per 1h."`
 }
 
 // AuthLimit is one limit: how many, and over how long. Either field left at zero

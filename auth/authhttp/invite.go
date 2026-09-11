@@ -25,7 +25,6 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 
 	pair, err := h.cfg.Accounts.AcceptInvitation(r.Context(), account.AcceptInput{
 		Token:     in.Token,
-		Password:  in.Password,
 		Client:    clientOf(in.Client),
 		IPAddress: h.addrString(r),
 		UserAgent: r.UserAgent(),
@@ -37,12 +36,102 @@ func (h *Handler) acceptInvitation(w http.ResponseWriter, r *http.Request) {
 	httpx.WriteJSON(w, http.StatusOK, pairOf(pair))
 }
 
+// inviteSomebody asks an address to join the caller's tenant, and creates
+// nothing in it.
+//
+// Who invited them comes from the claims and never from the body, which is the
+// same rule provisioning follows: a request that could name the inviter is a
+// request that could name somebody else, and the name is what a landing page
+// shows to somebody who has not signed in yet.
+func (h *Handler) inviteSomebody(w http.ResponseWriter, r *http.Request) {
+	claims, err := h.Claims(r)
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	if err := tenancy.Require(claims, account.PermissionProvision); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	var in authwire.InviteRequest
+	if err := decode(r, &in); err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	inv, err := h.cfg.Accounts.Invite(r.Context(), account.InviteInput{
+		TenantID:     claims.TenantID,
+		EmailAddress: in.EmailAddress,
+		DisplayName:  in.DisplayName,
+		Role:         account.Role(in.Role),
+		ByAccountID:  claims.Actor(),
+		ByAPIKeyID:   claims.ActorKey(),
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+	httpx.WriteJSON(w, http.StatusCreated, invitationViewOf(*inv))
+}
+
+// previewInvitation says what an invitation link is for, to whoever holds it.
+//
+// The token is in the query string rather than a body, which is what lets the
+// link in the mail be the request: a landing page reads it out of its own URL
+// and asks. That does put a live secret somewhere access logs and Referer
+// headers reach — the link in the mail already was — and a page that cannot
+// interpret the token it was handed is the failure this endpoint exists to fix,
+// so the trade is worth taking and worth knowing about.
+//
+// No credential, and none read. Somebody following an invitation is, more often
+// than not, signed out and on a device this installation has never seen. If they
+// *are* signed in, the identifier this hands back is what takes them through the
+// picker's door instead — see [github.com/simonjanss/rig/auth/account.Service.AcceptAsMe].
+//
+// An empty token goes through the service and gets the same 404 as a wrong one.
+// Short-circuiting it with a 400 would give the endpoint two answers where it
+// promised one.
+func (h *Handler) previewInvitation(w http.ResponseWriter, r *http.Request) {
+	inv, err := h.cfg.Accounts.PreviewInvitation(r.Context(), account.PreviewInput{
+		Token:     r.URL.Query().Get("token"),
+		IPAddress: h.addrString(r),
+		UserAgent: r.UserAgent(),
+	})
+	if err != nil {
+		h.fail(w, r, err)
+		return
+	}
+
+	httpx.WriteJSON(w, http.StatusOK, authwire.InvitationPreview{
+		ID:         inv.ID,
+		TenantID:   inv.TenantID,
+		TenantName: inv.TenantName,
+		// Masked here rather than in the service: a caller inside the process
+		// may well have a reason to see the address, and a caller over the wire
+		// has not proved they are its addressee.
+		EmailAddress: account.MaskEmail(inv.EmailAddress),
+		Role:         string(inv.Role),
+		InvitedBy:    inv.InvitedByName,
+		ExpiresAt:    inv.ExpiresAt,
+	})
+}
+
+// invitationViewOf is the administrator's view of one invitation.
+func invitationViewOf(i account.Invitation) authwire.InvitationView {
+	return authwire.InvitationView{
+		ID: i.ID, EmailAddress: i.EmailAddress, DisplayName: i.DisplayName,
+		Role: string(i.Role), InvitedBy: i.InvitedByName,
+		CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
+	}
+}
+
 // listInvitations answers with the invitations into the caller's tenant that are
 // still live.
 //
 // It needs the same permission inviting does: who has been invited and not yet
-// arrived is a list of people who do not work here yet, and that is administrative
-// rather than public.
+// arrived is a list of people who do not work here yet — and now literally so,
+// since none of them has an account. That is administrative rather than public.
 func (h *Handler) listInvitations(w http.ResponseWriter, r *http.Request) {
 	claims, err := h.Claims(r)
 	if err != nil {
@@ -62,10 +151,7 @@ func (h *Handler) listInvitations(w http.ResponseWriter, r *http.Request) {
 
 	out := make([]authwire.InvitationView, 0, len(pending))
 	for _, i := range pending {
-		out = append(out, authwire.InvitationView{
-			ID: i.ID, EmailAddress: i.EmailAddress, DisplayName: i.DisplayName,
-			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
-		})
+		out = append(out, invitationViewOf(i))
 	}
 	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.InvitationView]{Data: out})
 }
