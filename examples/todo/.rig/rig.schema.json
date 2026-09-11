@@ -77,17 +77,13 @@
           "$ref": "#/$defs/AuthSession",
           "description": "How long the credentials somebody holds stay valid."
         },
-        "password": {
-          "$ref": "#/$defs/AuthPassword",
-          "description": "What a new password must satisfy."
+        "email_code": {
+          "$ref": "#/$defs/AuthEmailCode",
+          "description": "Sign-in by a short code mailed to the address. The way in for anybody with no account at a configured provider."
         },
         "limits": {
           "$ref": "#/$defs/AuthLimits",
           "description": "Rate limits, counted in the database so replicas cannot disagree."
-        },
-        "allow_registration": {
-          "type": "boolean",
-          "description": "Mount the registration endpoint, where a stranger creates an account. Off means the route does not exist."
         },
         "allow_tenant_creation": {
           "type": "boolean",
@@ -127,6 +123,35 @@
       "additionalProperties": false,
       "type": "object"
     },
+    "AuthEmailCode": {
+      "properties": {
+        "enabled": {
+          "type": "boolean",
+          "description": "Mount the mailed-code sign-in. Off means the routes do not exist."
+        },
+        "length": {
+          "type": "integer",
+          "maximum": 10,
+          "minimum": 6,
+          "description": "How many digits a sign-in code has. Defaults to 6. Fewer is guessable whatever the attempt ceiling; more is a token, which belongs in a link."
+        },
+        "ttl": {
+          "$ref": "#/$defs/Duration",
+          "description": "How long a sign-in code lasts, for example 10m. Defaults to 10m."
+        },
+        "max_attempts": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "How many wrong guesses kill one code. Defaults to 3, deliberately well below the five wrong sign-ins that lock an address, so a clumsy attempt is recoverable. This is a ceiling on the code, not a rate limit on the address."
+        },
+        "allow_provisioning": {
+          "type": "boolean",
+          "description": "Send a code to an address rig has never seen, creating the person. Off means a code only goes to an address that already has an identity."
+        }
+      },
+      "additionalProperties": false,
+      "type": "object"
+    },
     "AuthLimit": {
       "properties": {
         "max": {
@@ -152,9 +177,13 @@
           "$ref": "#/$defs/AuthLimit",
           "description": "Failed sign-ins per source address. Looser than the per-address limit so an office behind one NAT does not trip it. Defaults to 50 per 15m."
         },
-        "password_reset": {
+        "email_code_request": {
           "$ref": "#/$defs/AuthLimit",
-          "description": "Password-reset requests per address. Defaults to 5 per 1h."
+          "description": "Sign-in codes mailed per address. Defaults to 5 per 1h."
+        },
+        "email_code_ip": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 20 per 1h."
         },
         "verification_resend": {
           "$ref": "#/$defs/AuthLimit",
@@ -167,6 +196,10 @@
         "api_key_failures": {
           "$ref": "#/$defs/AuthLimit",
           "description": "Failed API-key authentications per key. Defaults to 20 per 1m."
+        },
+        "invitation_preview": {
+          "$ref": "#/$defs/AuthLimit",
+          "description": "Invitation-link previews per source address. Defaults to 60 per 1h."
         }
       },
       "additionalProperties": false,
@@ -219,25 +252,6 @@
           },
           "type": "array",
           "description": "Identity providers to offer. Empty mounts no provider routes."
-        }
-      },
-      "additionalProperties": false,
-      "type": "object"
-    },
-    "AuthPassword": {
-      "properties": {
-        "min_length": {
-          "type": "integer",
-          "minimum": 8,
-          "description": "Minimum password length in characters. Defaults to 12."
-        },
-        "max_length": {
-          "type": "integer",
-          "description": "Maximum password length in characters. This bounds hashing work, not strength. Defaults to 1024."
-        },
-        "breach_check": {
-          "type": "boolean",
-          "description": "Reject passwords that appear in Have I Been Pwned. Only a hash prefix is sent, and the check fails open."
         }
       },
       "additionalProperties": false,

@@ -244,7 +244,7 @@
         </form>
       {{end}}
     {{end}}
-    <span class="tabs-note">one password, {{len .Tenants}} tenant{{if ne (len .Tenants) 1}}s{{end}} — switching reissues a session for that account</span>
+    <span class="tabs-note">one address, {{len .Tenants}} tenant{{if ne (len .Tenants) 1}}s{{end}} — switching reissues a session for that account</span>
   </div>
 </nav>
 {{end}}
@@ -381,8 +381,8 @@
     </p>
     <ul class="scenarios">
       <li><b>Create a tenant</b> — a tenant, an identity, an Owner account and a role, in one transaction.</li>
-      <li><b>Invite somebody</b> — a single-use link that sets a first password and confirms the address.</li>
-      <li><b>Be in two tenants</b> — one address, one password, two accounts, two roles.</li>
+      <li><b>Invite somebody</b> — a single-use link, and nobody is a member until they follow it.</li>
+      <li><b>Be in two tenants</b> — one address, two accounts, two roles.</li>
       <li><b>Mint an API key</b> — write a note with it, and watch the row name the key it came through.</li>
       <li><b>Read the trail</b> — every attempt, rotation and lockout lands in <code>auth_log</code>.</li>
     </ul>
@@ -400,54 +400,35 @@
         decide.
       </p>
       <p class="note">
-        rig has no endpoint for the tenant half on its own.
-        <code>rig setup-project</code> creates no tenant, because “who may” is a
-        product question with several right answers — so it is forty lines in
-        <code>services/tenant</code>, reached here directly and through
-        <code>OnCreateTenant</code> from the picker.
+        There is no form for it here, and that is the flow rather than an
+        omission: sign in with a code below, land in the picker, and make one
+        from there. A tenant is created by somebody who has proved an address,
+        which is the only order that makes sense once nothing has a password.
       </p>
-      <form method="post" action="/ui/signup">
-        <label class="field"><span>Tenant name</span>
-          <input name="tenantName" required placeholder="Acme" autocomplete="off"></label>
-        <div class="row">
-          <label class="field"><span>Your name</span>
-            <input name="name" placeholder="Ada" autocomplete="off"></label>
-          <label class="field"><span>Email address</span>
-            <input name="email" type="email" required placeholder="ada@acme.test" autocomplete="off"></label>
-        </div>
-        <label class="field"><span>Password — at least 12 characters</span>
-          <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
-        <button>Create tenant</button>
-      </form>
     </div>
   </div>
 
   <div class="stack">
     <div class="panel">
-      <h2>Create an account <span class="right dim">no tenant</span></h2>
+      <h2>Ask for a code <span class="right dim">step one of one</span></h2>
       <div class="body">
         <p class="note">
-          A person and nothing else: no tenant, no tenant session, just proof of
-          who you are. What comes back is an <b>identity session</b> — a credential
-          with its own token prefix that names no tenant and cannot read
-          application data — and it lands you in the picker, where you either
-          accept an invitation or make a tenant.
+          <code>POST /auth/email-code</code> answers <b>204</b> whatever you type,
+          registered or not: any difference would make this endpoint a list of
+          who has an account here. The code lands in the outbox at the bottom of
+          this page, because there is no mail server — the code on the screen
+          <em>is</em> the code in the mail.
         </p>
         <p class="note">
-          <code>POST /auth/register</code> exists only because this application set
-          <code>AllowRegistration</code>. Leave it off and the route is absent
-          rather than answering 403, which is what an invite-only product wants.
+          This deployment sets <code>allow_provisioning</code>, so a code goes to
+          an address rig has never seen and the person is created when it is
+          asked for. Leave that off and the deployment is invite-only: a code
+          only reaches somebody already invited.
         </p>
-        <form method="post" action="/ui/register">
-          <div class="row">
-            <label class="field"><span>Your name</span>
-              <input name="name" placeholder="Grace" autocomplete="off"></label>
-            <label class="field"><span>Email address</span>
-              <input name="email" type="email" required placeholder="grace@acme.test" autocomplete="off"></label>
-          </div>
-          <label class="field"><span>Password — at least 12 characters</span>
-            <input name="password" type="password" required minlength="12" autocomplete="new-password"></label>
-          <button>Create account</button>
+        <form method="post" action="/ui/code">
+          <label class="field"><span>Email address</span>
+            <input name="email" type="email" required placeholder="grace@acme.test" autocomplete="username"></label>
+          <button>Mail me a code</button>
         </form>
       </div>
     </div>
@@ -461,7 +442,7 @@
           GET — no session, no token, nobody having proved they own an address — so
           there is nobody to have tenants yet. The callback resolves who you are
           and the picker answers where you go, which is exactly what
-          <code>POST /auth/login</code> does after a password.
+          <code>POST /auth/email-code/verify</code> does after a code.
         </p>
         {{range .Providers}}
         <p>
@@ -500,37 +481,56 @@
     </div>
 
     <div class="panel">
-      <h2>Sign in</h2>
+      <h2>Type the code back</h2>
       <div class="body">
         <p class="note">
-          An address and a password, and no tenant: nobody knows which
-          tenants an address belongs to until the password has been checked, so
-          asking first would ask a question you cannot answer. You land in one of
-          yours and the tabs reach the rest.
+          An address, a code, and no tenant: nobody knows which tenants an
+          address belongs to until the code has come back, so asking first would
+          ask a question you cannot answer. You land in one of yours and the tabs
+          reach the rest.
         </p>
-        <form method="post" action="/ui/login">
+        <p class="note">
+          The code dies after three wrong guesses — a rate limit slows guessing
+          down, and six digits need a secret that actually stops being usable.
+          Ask for another and the old one stops working, so the newest is always
+          the one that works.
+        </p>
+        <form method="post" action="/ui/signin">
           <label class="field"><span>Email address</span>
             <input name="email" type="email" required autocomplete="username"></label>
-          <label class="field"><span>Password</span>
-            <input name="password" type="password" required autocomplete="current-password"></label>
+          <label class="field"><span>Code</span>
+            <input name="code" required inputmode="numeric" autocomplete="one-time-code"
+                   placeholder="from the outbox below"></label>
           <button>Sign in</button>
         </form>
       </div>
     </div>
 
     <div class="panel">
-      <h2>Accept an invitation</h2>
+      <h2>Land on an invitation</h2>
       <div class="body">
         <p class="note">
-          Unauthenticated, and with no tenant header: the link says which tenant
-          it is for. Redeeming it sets a first password, confirms the address and
-          returns a session — one round trip.
+          <b>Look first.</b> <code>GET /auth/invitations/preview</code> is the one
+          thing rig answers to somebody who has proved nothing but that they hold
+          a link — the tenant's name, who invited them, and the address masked,
+          because holding a forwarded link does not prove you are its addressee.
+          It spends nothing: previewing does not consume the link and does not
+          extend it.
+        </p>
+        <form method="post" action="/ui/invite/preview">
+          <label class="field"><span>Invitation token</span>
+            <input name="token" required placeholder="paste from the outbox below" autocomplete="off"></label>
+          <button>What is this?</button>
+        </form>
+        <p class="note">
+          Then accept. Unauthenticated, and with no tenant header: the link says
+          which tenant it is for. <b>Accepting is what creates the account</b> —
+          until now nobody was a member, and nothing in the tenant was scoped to
+          them.
         </p>
         <form method="post" action="/ui/accept">
           <label class="field"><span>Invitation token</span>
             <input name="token" required placeholder="paste from the outbox below" autocomplete="off"></label>
-          <label class="field"><span>Choose a password — ignored if you already have one</span>
-            <input name="password" type="password" minlength="12" autocomplete="new-password"></label>
           <button>Accept invitation</button>
         </form>
       </div>
@@ -811,7 +811,7 @@
   <div class="body">
     <p class="note">
       One table doing two jobs: what an operator reads after an incident, and what
-      the lockout counts. Six wrong passwords for one address and the next attempt
+      the lockout counts. Five wrong codes for one address and the next attempt
       is a 429 — worth trying from the sign-in form.
     </p>
     <p class="note">

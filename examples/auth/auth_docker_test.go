@@ -24,6 +24,7 @@ import (
 	"github.com/simonjanss/rig/examples/auth/internal/api"
 	"github.com/simonjanss/rig/examples/auth/services/authz"
 	"github.com/simonjanss/rig/examples/auth/services/note"
+	"github.com/simonjanss/rig/examples/auth/services/outbox"
 )
 
 // This is the walk-through the README describes, run against a real database:
@@ -41,12 +42,9 @@ func TestTheSessionFlow(t *testing.T) {
 	}
 
 	t.Run("signing in returns a pair", func(t *testing.T) {
-		res := api.do(t, request{
-			method: http.MethodPost, path: "/auth/login", tenant: tenant,
-			body: map[string]any{"emailAddress": SeedEmail, "password": SeedPassword},
-		})
+		res := api.verify(t, tenant, SeedEmail, api.askForCode(t, tenant, SeedEmail))
 		if res.status != http.StatusOK {
-			t.Fatalf("login: %d %s", res.status, res.body)
+			t.Fatalf("sign in: %d %s", res.status, res.body)
 		}
 		res.decode(t, &pair)
 
@@ -151,12 +149,11 @@ func TestPermissionsAreRequiredAndDerived(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
-	// A second person in the same tenant, with a password and no role.
+	// A second person in the same tenant, with no role.
 	reader := "bob-" + uuid.New().String()[:8] + "@example.com"
 	api.addPerson(t, tenant, reader, "Bob")
-	api.setPassword(t, reader, SeedPassword)
 
-	token := api.login(t, tenant, reader, SeedPassword)
+	token := api.login(t, tenant, reader)
 
 	for _, tc := range []struct {
 		name   string
@@ -183,7 +180,7 @@ func TestPermissionsAreRequiredAndDerived(t *testing.T) {
 	}
 
 	// The seeded Owner holds every derived key, so the same requests work.
-	owner := api.login(t, tenant, SeedEmail, SeedPassword)
+	owner := api.login(t, tenant, SeedEmail)
 	if res := api.do(t, request{
 		method: http.MethodGet, path: "/api/v1/notes", token: owner,
 	}); res.status != http.StatusOK {
@@ -226,8 +223,8 @@ func TestATokenIsScopedToItsTenant(t *testing.T) {
 	api.grantEverything(t, second, newAccount)
 
 	// The password she already had, unchanged, signing in to both.
-	elsewhere := api.login(t, second, SeedEmail, SeedPassword)
-	here := api.login(t, first, SeedEmail, SeedPassword)
+	elsewhere := api.login(t, second, SeedEmail)
+	here := api.login(t, first, SeedEmail)
 
 	api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/notes", token: here,
@@ -243,45 +240,69 @@ func TestATokenIsScopedToItsTenant(t *testing.T) {
 	}
 }
 
-// Wrong passwords are counted, and enough of them stop the account being a
-// password oracle. The window is per address, so this uses one of its own.
-func TestRepeatedFailuresLockTheAccount(t *testing.T) {
+// Wrong codes are counted, and enough of them stop the address being a guessing
+// oracle. The window is per address, so this uses one of its own.
+//
+// Two limits are in play and the interaction is the interesting part: a code
+// dies after three wrong guesses, and asking for another is itself limited to
+// five an hour. So a sprayer runs out of codes before they run out of guesses,
+// and what they hit is whichever limit comes first.
+func TestRepeatedFailuresLockTheAddress(t *testing.T) {
 	api := newServer(t)
 	tenant := api.seed(t)
 
 	victim := "locked-" + uuid.New().String()[:8] + "@example.com"
 	api.addPerson(t, tenant, victim, "Locked")
-	api.setPassword(t, victim, SeedPassword)
+	code := api.askForCode(t, tenant, victim)
 
 	var last response
 	for range 8 {
-		last = api.do(t, request{
-			method: http.MethodPost, path: "/auth/login", tenant: tenant,
-			body: map[string]any{"emailAddress": victim, "password": "not the password"},
-		})
+		last = api.verify(t, tenant, victim, "000000")
 		if last.status == http.StatusTooManyRequests {
 			break
 		}
 		if last.status != http.StatusUnauthorized {
-			t.Fatalf("a wrong password should be 401, got %d %s", last.status, last.body)
+			t.Fatalf("a wrong code should be 401, got %d %s", last.status, last.body)
 		}
 	}
 
 	if last.status != http.StatusTooManyRequests {
-		t.Fatalf("repeated failures should lock the account, got %d", last.status)
+		t.Fatalf("repeated failures should lock the address, got %d", last.status)
 	}
 	if last.headers.Get("Retry-After") == "" {
 		t.Error("a 429 should say when to come back")
 	}
 
-	// And the lockout is about the address, not about the password: the right
-	// one is refused too while the window is open.
-	res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/login", tenant: tenant,
-		body: map[string]any{"emailAddress": victim, "password": SeedPassword},
-	})
-	if res.status != http.StatusTooManyRequests {
-		t.Errorf("the correct password during a lockout: %d, want 429", res.status)
+	// And the lockout is about the address, not about the code: the right one is
+	// refused too while the window is open.
+	if res := api.verify(t, tenant, victim, code); res.status != http.StatusTooManyRequests {
+		t.Errorf("the correct code during a lockout: %d, want 429", res.status)
+	}
+}
+
+// A code that has been guessed at enough times is dead, and asking for another
+// is the way out — which is why the ceiling is well below the address lockout.
+func TestACodeDiesOfGuessing(t *testing.T) {
+	api := newServer(t)
+	tenant := api.seed(t)
+
+	person := "guessed-" + uuid.New().String()[:8] + "@example.com"
+	api.addPerson(t, tenant, person, "Guessed")
+	code := api.askForCode(t, tenant, person)
+
+	for i := range 3 {
+		if res := api.verify(t, tenant, person, "000000"); res.status != http.StatusUnauthorized {
+			t.Fatalf("guess %d: %d %s", i+1, res.status, res.body)
+		}
+	}
+	if res := api.verify(t, tenant, person, code); res.status != http.StatusUnauthorized {
+		t.Errorf("the burned code should stay dead: %d %s", res.status, res.body)
+	}
+
+	// The way out, and it works while the address is still well inside its own
+	// window: a fresh code signs them in.
+	if token := api.login(t, tenant, person); token == "" {
+		t.Error("a fresh code should sign them in")
 	}
 }
 
@@ -289,6 +310,10 @@ func TestRepeatedFailuresLockTheAccount(t *testing.T) {
 type server struct {
 	pool *pgxpool.Pool
 	http *httptest.Server
+	// mail is the example's own mailbox, which is the only place a sign-in code
+	// exists in plaintext: the database keeps a hash. A test reads it the way
+	// somebody reads their inbox.
+	mail *outbox.Box
 }
 
 func newServer(t *testing.T) *server {
@@ -313,7 +338,7 @@ func newServer(t *testing.T) *server {
 	// The same function main uses, so what the test drives is what runs.
 	srv := httptest.NewUnstartedServer(nil)
 
-	handler, front, _, err := newAPI(context.Background(), pool, baseURL(), slog.Default())
+	handler, front, _, mail, err := newAPI(context.Background(), pool, baseURL(), slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -321,7 +346,7 @@ func newServer(t *testing.T) *server {
 	srv.Config.Handler = handler
 	srv.Start()
 	t.Cleanup(srv.Close)
-	return &server{pool: pool, http: srv}
+	return &server{pool: pool, http: srv, mail: mail}
 }
 
 // closeAuth registers the one shutdown `cache:` in rig.yaml adds, which is the
@@ -477,38 +502,47 @@ func (s *server) grantEverything(t *testing.T, tenantID, accountID uuid.UUID) {
 		ON CONFLICT (account_id, role_id) DO NOTHING`, uuid.New(), accountID, roleID)
 }
 
-// setPassword goes through the account service, because a hash is not a value a
-// test gets to invent either.
+// askForCode asks for a sign-in code and reads it out of the mailbox.
 //
-// No tenant: the password belongs to the person, so the address is looked up in
-// the identity table and the result covers every tenant they are in.
-func (s *server) setPassword(t *testing.T, email, plain string) {
-	t.Helper()
-
-	var id uuid.UUID
-	if err := s.pool.QueryRow(context.Background(),
-		`SELECT id FROM rig_identity WHERE lower(email_address) = lower($1)`, email).Scan(&id); err != nil {
-		t.Fatalf("find %s: %v", email, err)
-	}
-
-	accounts, err := accountService(s.pool)
-	if err != nil {
-		t.Fatal(err)
-	}
-	if err := accounts.SetPassword(context.Background(), id, plain); err != nil {
-		t.Fatalf("set a password for %s: %v", email, err)
-	}
-}
-
-func (s *server) login(t *testing.T, tenant uuid.UUID, email, password string) string {
+// The whole of what a sign-in needs to be set up: no credential to create, no
+// hash for a test to invent. An address that has never been seen gets an
+// identity here too, because this example sets allow_provisioning.
+func (s *server) askForCode(t *testing.T, tenant uuid.UUID, email string) string {
 	t.Helper()
 
 	res := s.do(t, request{
-		method: http.MethodPost, path: "/auth/login", tenant: tenant,
-		body: map[string]any{"emailAddress": email, "password": password},
+		method: http.MethodPost, path: "/auth/email-code", tenant: tenant,
+		body: map[string]any{"emailAddress": email},
 	})
+	if res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code for %s: %d %s", email, res.status, res.body)
+	}
+	return s.codeFor(t, email)
+}
+
+// codeFor reads the newest code mailed to an address out of the mailbox.
+//
+// The only place a code exists in plaintext: the database keeps a hash, which is
+// what makes a dump of it not a dump of everybody's account.
+func (s *server) codeFor(t *testing.T, email string) string {
+	t.Helper()
+
+	for _, m := range s.mail.Messages() {
+		if m.Kind == outbox.KindEmailCode && strings.EqualFold(m.To, email) {
+			return m.Token
+		}
+	}
+	t.Fatalf("no code was mailed to %s", email)
+	return ""
+}
+
+// login is the whole flow: ask for a code, type it back, keep the session.
+func (s *server) login(t *testing.T, tenant uuid.UUID, email string) string {
+	t.Helper()
+
+	res := s.verify(t, tenant, email, s.askForCode(t, tenant, email))
 	if res.status != http.StatusOK {
-		t.Fatalf("login as %s: %d %s", email, res.status, res.body)
+		t.Fatalf("sign in as %s: %d %s", email, res.status, res.body)
 	}
 
 	var pair struct {
@@ -516,6 +550,17 @@ func (s *server) login(t *testing.T, tenant uuid.UUID, email, password string) s
 	}
 	res.decode(t, &pair)
 	return pair.AccessToken
+}
+
+// verify types a code back without insisting it worked, for the tests whose
+// subject is the refusal.
+func (s *server) verify(t *testing.T, tenant uuid.UUID, email, code string) response {
+	t.Helper()
+
+	return s.do(t, request{
+		method: http.MethodPost, path: "/auth/email-code/verify", tenant: tenant,
+		body: map[string]any{"emailAddress": email, "code": code},
+	})
 }
 
 type request struct {
@@ -703,8 +748,8 @@ func TestAServiceAccountCannotSignIn(t *testing.T) {
 		INSERT INTO rig_account (id, tenant_id, created_at, kind, email_address, display_name, is_active)
 		VALUES ($1, $2, now(), 'Service', $3, 'A machine', true)`, id, tenant, address)
 
-	// There is no password to set: a service account has no identity, so there
-	// is nothing for a credential to hang off. The address resolves to nobody.
+	// There is nothing to set up: a service account has no identity, so a code
+	// has nothing to hang off. The address resolves to nobody.
 	var exists bool
 	if err := api.pool.QueryRow(context.Background(),
 		`SELECT exists (SELECT 1 FROM rig_identity WHERE lower(email_address) = lower($1))`,
@@ -719,18 +764,12 @@ func TestAServiceAccountCannotSignIn(t *testing.T) {
 	// gets. Before identities were separate this was a 403 saying "use its API
 	// key", which was friendlier and also confirmed that the integration exists;
 	// now the address resolves to nobody and the answer gives nothing away.
-	res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/login", tenant: tenant,
-		body: map[string]any{"emailAddress": address, "password": SeedPassword},
-	})
+	res := api.verify(t, tenant, address, "000000")
 	if res.status != http.StatusUnauthorized {
 		t.Fatalf("a service account signing in: %d %s, want 401", res.status, res.body)
 	}
 
-	stranger := api.do(t, request{
-		method: http.MethodPost, path: "/auth/login", tenant: tenant,
-		body: map[string]any{"emailAddress": "nobody-at-all@example.com", "password": SeedPassword},
-	})
+	stranger := api.verify(t, tenant, "nobody-at-all@example.com", "000000")
 	// Everything except the requestId, which is per request by design: every
 	// request is named, so two of them are never byte-identical and never should
 	// be. What must not differ is what the answer says.
@@ -849,7 +888,7 @@ func TestAWriteRecordsTheKeyItCameThrough(t *testing.T) {
 	// machine do this" as well as "which one".
 	human := api.do(t, request{
 		method: http.MethodPost, path: "/api/v1/notes",
-		token: api.login(t, tenant, SeedEmail, SeedPassword),
+		token: api.login(t, tenant, SeedEmail),
 		body:  map[string]any{"title": "Typed by hand"},
 	})
 	if human.status != http.StatusCreated {
@@ -901,24 +940,14 @@ func TestProvisioningAnAccount(t *testing.T) {
 
 		// The row says both who and through what — the whole point of the key
 		// audit columns.
-		var (
-			byAccount, byKey *uuid.UUID
-			hasCredential    bool
-		)
+		var byAccount, byKey *uuid.UUID
 		if err := api.pool.QueryRow(context.Background(), `
-			SELECT rig_account.created_by_account_id, rig_account.created_by_api_key_id,
-			       EXISTS (SELECT 1 FROM rig_identity_credential
-			                WHERE identity_id = rig_account.identity_id)
-			  FROM rig_account WHERE id = $1`, got.ID).Scan(&byAccount, &byKey, &hasCredential); err != nil {
+			SELECT created_by_account_id, created_by_api_key_id
+			  FROM rig_account WHERE id = $1`, got.ID).Scan(&byAccount, &byKey); err != nil {
 			t.Fatal(err)
 		}
 		if byKey == nil || *byKey == uuid.Nil {
 			t.Error("the provisioned account should name the key that made it")
-		}
-		// And no password: an account somebody can sign in to needs one set
-		// through a flow with its own rules.
-		if hasCredential {
-			t.Error("provisioning must not create a credential")
 		}
 	})
 
@@ -957,14 +986,14 @@ func TestProvisioningAnAccount(t *testing.T) {
 	})
 
 	t.Run("without the permission it is refused", func(t *testing.T) {
-		// Bob has a password and no role, so he is authenticated and not allowed.
+		// Bob has an account and no role, so he is authenticated and not
+		// allowed.
 		bob := "bob-" + uuid.New().String()[:8] + "@example.com"
 		api.addPerson(t, tenant, bob, "Bob")
-		api.setPassword(t, bob, SeedPassword)
 
 		res := api.do(t, request{
 			method: http.MethodPost, path: "/auth/accounts",
-			token: api.login(t, tenant, bob, SeedPassword),
+			token: api.login(t, tenant, bob),
 			body:  map[string]any{"emailAddress": "another@example.com", "displayName": "Another"},
 		})
 		if res.status != http.StatusForbidden {
@@ -998,12 +1027,11 @@ func TestAScopedReadIsNarrowUntilItIsWidened(t *testing.T) {
 
 	// Ada is the seeded owner. Linus is an ordinary member, granted only the
 	// derived read and write.
-	ada := api.login(t, tenant, SeedEmail, SeedPassword)
+	ada := api.login(t, tenant, SeedEmail)
 	linusEmail := "linus-" + uuid.New().String()[:8] + "@example.com"
 	_, linusID := api.addPerson(t, tenant, linusEmail, "Linus")
-	api.setPassword(t, linusEmail, SeedPassword)
 	api.grant(t, tenant, linusID, "member", note.PermissionRead, note.PermissionWrite)
-	linus := api.login(t, tenant, linusEmail, SeedPassword)
+	linus := api.login(t, tenant, linusEmail)
 
 	mine := api.writeNote(t, ada, "Ada wrote this")
 	theirs := api.writeNote(t, linus, "Linus wrote this")

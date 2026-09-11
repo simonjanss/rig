@@ -255,7 +255,7 @@ async function call(
 
         // One reauthorization, and only for a credential that can do something
         // about it. A blind retry on 401 is a way to lock an account out with a
-        // wrong password.
+        // wrong code.
         if (res.status === 401 && !reauthorized) {
             const cred = rt.getCredential();
             if (isReauthorizer(cred) && opts.anonymous !== true) {

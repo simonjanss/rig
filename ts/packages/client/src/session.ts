@@ -78,7 +78,7 @@ export class Session implements Reauthorizer, Credential {
 
     /**
      * Swaps in a newly issued pair, which is what a refresh, a tenant switch and
-     * a password change all produce.
+     * an impersonation all produce.
      */
     replace(pair: TokenPair): void {
         // A response that carried no new refresh token keeps the one in hand:

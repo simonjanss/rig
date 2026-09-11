@@ -25,7 +25,6 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/oauth"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
@@ -112,6 +111,15 @@ type Hooks struct {
 	// The trade in the other direction is latency: a queued reset mail arrives up
 	// to one dispatch interval late, where inline it went out inside the request.
 	Mail auth.MailOptions
+
+	// OnJoined runs inside the transaction that accepts an invitation, after the
+	// account exists and before the session is issued, and an error rolls the
+	// acceptance back.
+	//
+	// It is where a new member's roles and rows are seeded. Provision is called by
+	// your own code, so what else a new member needs is your next line; accepting
+	// an invitation is called by rig's handler, and this is that line.
+	OnJoined func(context.Context, account.Joined) error
 
 	// OnSessionRefresh replaces a session's payload every time it is refreshed.
 	// Nil carries the previous one forward unchanged.
@@ -353,11 +361,9 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 		RotationLeeway:     30 * time.Second,
 		IdentitySessionTTL: 30 * time.Minute,
 
-		Policy: password.Policy{MinLength: 12, MaxLength: 1024},
-
-		AllowRegistration:    false,
 		AllowTenantCreation:  false,
 		RequireVerifiedEmail: false,
+		OnJoined:             h.OnJoined,
 
 		Grants:           h.Grants,
 		Notifier:         h.Notifier,
@@ -545,10 +551,12 @@ func limits() throttle.Defaults {
 	d := throttle.Standard()
 	d.LoginByEmail.Max, d.LoginByEmail.Window = 5, 15*time.Minute
 	d.LoginByIP.Max, d.LoginByIP.Window = 50, 15*time.Minute
-	d.PasswordReset.Max, d.PasswordReset.Window = 5, time.Hour
+	d.EmailCodeRequest.Max, d.EmailCodeRequest.Window = 5, time.Hour
+	d.EmailCodeByIP.Max, d.EmailCodeByIP.Window = 20, time.Hour
 	d.VerificationResend.Max, d.VerificationResend.Window = 5, time.Hour
 	d.Refresh.Max, d.Refresh.Window = 60, time.Minute
 	d.APIKeyFailures.Max, d.APIKeyFailures.Window = 20, time.Minute
+	d.InvitationPreview.Max, d.InvitationPreview.Window = 60, time.Hour
 	return d
 }
 

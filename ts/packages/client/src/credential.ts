@@ -14,7 +14,7 @@ export type Credential = {
  * A credential that can do something about a 401.
  *
  * The runtime asks once, and only ever once per call: a blind retry on 401 is a
- * way to lock an account out with a wrong password. Answering `false` leaves the
+ * way to lock an account out with a wrong code. Answering `false` leaves the
  * 401 as the answer, which is what a credential with nothing left to try should
  * say — throwing would replace the server's refusal with the client's opinion
  * of it.

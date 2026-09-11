@@ -29,7 +29,6 @@ import (
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/notify/notifyhttp"
 	"github.com/simonjanss/rig/presence"
@@ -227,7 +226,6 @@ func authMux(t *testing.T) *http.ServeMux {
 		Store:      account.NewMemoryStore(),
 		Sessions:   sessions,
 		Identities: identities,
-		Hasher:     password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 		Notifier:   account.NoNotifier{},
 		Limiter:    throttle.New(counter).WithClock(now),
 		Now:        now,

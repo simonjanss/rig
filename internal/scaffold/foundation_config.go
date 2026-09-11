@@ -228,6 +228,9 @@ operations: [Get, List, Search]`,
       InvitationAccepted:
         name: InvitationAccepted
         description: An invitation was redeemed, which is what created the account in the tenant. It confirms the address too.
+      InvitationPreviewed:
+        name: InvitationPreviewed
+        description: Somebody holding an invitation link asked what it was for, without spending it. Recorded whether or not the link was real, because it is what bounds one source walking the token space.
       InvitationRevoked:
         name: InvitationRevoked
         description: An invitation was withdrawn before it was used, so the link stopped working. No account existed to remove.

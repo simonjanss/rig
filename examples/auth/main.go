@@ -20,7 +20,7 @@
 // else's code.
 //
 // And the settings are not in this file. The `auth:` block in rig.yaml holds
-// every fixed choice — the lifetimes, the rotation leeway, the password policy,
+// every fixed choice — the lifetimes, the rotation leeway, the code flow,
 // the rate limits, which routes exist — because the reference documentation and
 // the client libraries are generated from that file. What is here is the three
 // functions a file cannot hold.
@@ -165,7 +165,7 @@ func main() {
 		},
 		Migrate: migrate.Require(migrations, migrate.Options{}),
 	}, func(ctx context.Context, app *serve.App) (api.Parts, error) {
-		mux, front, engine, err := newAPI(ctx, app.Pool, baseURL(), app.Logger)
+		mux, front, engine, _, err := newAPI(ctx, app.Pool, baseURL(), app.Logger)
 		if err != nil {
 			return api.Parts{}, err
 		}
@@ -196,7 +196,7 @@ func main() {
 // file has a constructor both callers share instead of building services inside
 // the mount closure.
 func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
-	_, _, engine, err := newAPI(ctx, pool, baseURL(), slog.Default())
+	_, _, engine, _, err := newAPI(ctx, pool, baseURL(), slog.Default())
 	if err != nil {
 		return err
 	}
@@ -218,7 +218,7 @@ func dispatchNotifications(ctx context.Context, pool *pgxpool.Pool) error {
 // something else.
 func newAPI(
 	ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logger,
-) (http.Handler, *auth.Auth, *notify.Engine, error) {
+) (http.Handler, *auth.Auth, *notify.Engine, *outbox.Box, error) {
 	repos := store.New(pool, store.Config{})
 
 	// The inbox, and the two halves of it that have to be built in this order.
@@ -259,7 +259,7 @@ func newAPI(
 	// says the address is verified.
 	live, err := api.ConfiguredProviders(api.OAuthHooks{})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	var (
 		demo  *idp.Server
@@ -300,7 +300,7 @@ func newAPI(
 	// project and therefore generated rather than written in any of them.
 	//
 	// Everything with a fixed answer is in the file: the base path, the tenant
-	// sources, the token lifetimes and the rotation leeway, the password policy,
+	// sources, the token lifetimes and the rotation leeway, the code flow,
 	// the rate limits, and that registration and tenant creation are both open.
 	// What is left here is the part that is code.
 	front, err = api.New(pool, api.Hooks{
@@ -363,6 +363,21 @@ func newAPI(
 			OnCreated: authz.SeedFor(append(api.PermissionKeys(), authz.AuthKeys()...), grants),
 		},
 
+		// What a new member needs beyond their account row, in the transaction
+		// that created it: the grants that go with the level they were invited
+		// as. rig has no idea what "Admin" means here, so an invited Admin with
+		// no grants could sign in and do nothing.
+		//
+		// It is a hook rather than the next line after a call, and that is
+		// what changed: the account used to be created by whoever invited them,
+		// so seeding it was the inviting handler's job. Accepting is called by
+		// rig's own handler now — a person following a link from their mail —
+		// and there is no application code in that request but this.
+		OnJoined: func(ctx context.Context, in account.Joined) error {
+			return authz.GrantLevel(ctx, pool, in.TenantID, in.AccountID,
+				string(in.Role), append(api.PermissionKeys(), authz.AuthKeys()...), grants)
+		},
+
 		// OnError is left out on purpose: the wiring is generated into this API's
 		// own package, so an authentication failure goes through the same error
 		// mapper as everything else and a 401 from the sign-in endpoint is shaped
@@ -394,7 +409,7 @@ func newAPI(
 			// a tenant was always named. Here nothing named one, both fields are
 			// uuid.Nil, and issuing from them would put a session in a tenant
 			// that does not exist. SignInIdentity is what answers instead — the
-			// same last step a password login runs — and it may well answer
+			// same last step a code sign-in runs — and it may well answer
 			// "nowhere yet", which is the state the picker draws.
 			OnSignIn: func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error {
 				res, err := front.Parts().Accounts.SignInIdentity(r.Context(),
@@ -419,7 +434,7 @@ func newAPI(
 		},
 	})
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// And now the bus exists, so the cache above can hear the invalidations it
@@ -469,7 +484,7 @@ func newAPI(
 	// tables. It is here rather than inside auth.New because construction does no
 	// I/O.
 	if err := authz.SyncPermissions(ctx, pool, api.PermissionKeys()); err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 
 	// And the interface, which is a client of everything above rather than a
@@ -478,7 +493,7 @@ func newAPI(
 	// to be the one thing it reached past the API for.
 	ui, err := web.New(mux, pool, mail, grants, front.Providers())
 	if err != nil {
-		return nil, nil, nil, err
+		return nil, nil, nil, nil, err
 	}
 	ui.Mount(mux)
 
@@ -494,7 +509,7 @@ func newAPI(
 		http.Redirect(w, r, "/ui", http.StatusFound)
 	})
 
-	return mux, front, engine, nil
+	return mux, front, engine, mail, nil
 }
 
 // pruneAuthLog deletes authentication log entries past the retention window.
@@ -546,13 +561,13 @@ func pruneAuthLog(ctx context.Context, pool *pgxpool.Pool) error {
 }
 
 // accountService builds the account service on its own, for the work that
-// happens outside a request: the seed, and a test that needs to set a password.
+// happens outside a request: the seed, and a test that needs to reach a flow.
 //
-// It goes through the generated wiring rather than assembling a bare one, so a
-// password set here is held to the policy in rig.yaml and not to whatever the
-// module's default happens to be. Setting one directly is deliberately not a
-// shortcut around anything — it is the same argon2id hashing, the same length
-// policy and the same auth_log entry the endpoints go through.
+// It goes through the generated wiring rather than assembling a bare one, so
+// whatever reaches it is held to the numbers in rig.yaml and not to whatever the
+// module's defaults happen to be. Reaching the service directly is deliberately
+// not a shortcut around anything — it is the same rate limits and the same
+// auth_log entries the endpoints go through.
 func accountService(pool *pgxpool.Pool) (*account.Service, error) {
 	front, err := api.New(pool, api.Hooks{Grants: authz.Grants(pool)})
 	if err != nil {
@@ -566,17 +581,17 @@ func accountService(pool *pgxpool.Pool) (*account.Service, error) {
 const (
 	SeedTenantID = "00000000-0000-0000-0000-000000000001"
 	SeedEmail    = "ada@example.com"
-	SeedPassword = "correct horse battery staple"
 )
 
-// seed creates a tenant, an account with a password, and a role that may write
-// notes.
+// seed creates a tenant, an account for Ada, and a role that may write notes.
 //
 // The rows are plain SQL, because the foundation's tables have no generated
-// repository to go through — that is the point of them belonging to rig/auth. The
-// password does go through the account service, because a hash is not a field
-// somebody sets: that is the same argon2id, the same policy and the same log
-// entry the endpoints use.
+// repository to go through — that is the point of them belonging to rig/auth.
+//
+// Nothing is set up for Ada to sign in with, because there is nothing to set
+// up: she asks for a code at the address below and types it back. That is the
+// whole of rig's sign-in now, and it is why this function is shorter than it
+// was.
 func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	tenantID, err := uuid.Parse(SeedTenantID)
 	if err != nil {
@@ -603,7 +618,7 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	}
 
 	// The person first, then their account here. Ada is one person with one
-	// password; this tenant is one of the places she works, and the row that
+	// identity; this tenant is one of the places she works, and the row that
 	// says so is the account.
 	//
 	// Looked up rather than upserted: the address is unique only among live rows
@@ -702,23 +717,11 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 
-	// The password last and outside the transaction, because it goes through the
-	// account service: argon2id, the length policy, and an auth_log entry are
-	// all things this file should not be reimplementing.
-	//
-	// It is set on the identity, not on the account. One password, however many
-	// tenants Ada is later invited into.
-	accounts, err := accountService(pool)
-	if err != nil {
-		return err
-	}
-	if err := accounts.SetPassword(ctx, identityID, SeedPassword); err != nil {
-		return fmt.Errorf("password: %w", err)
-	}
-
-	fmt.Printf("seeded tenant %s (addresses in example.com) with %s / %q — Owner, "+
-		"holding %d permissions: %s\n", tenantID, SeedEmail, SeedPassword,
+	fmt.Printf("seeded tenant %s (addresses in example.com) with %s — Owner, "+
+		"holding %d permissions: %s\n", tenantID, SeedEmail,
 		len(keys), strings.Join(keys, ", "))
+	fmt.Println("ask for a code at /auth/email-code and read it off the page: " +
+		"this example's notifier prints what it would have mailed.")
 
 	return seedIntegration(ctx, pool, tenantID, accountID)
 }

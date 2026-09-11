@@ -25,7 +25,7 @@ const profile: AuthProfile = {
     accessTtlMs: 600_000,
     refreshTtlMs: 43_200_000,
     rotationLeewayMs: 30_000,
-    hasRegistration: true,
+    hasEmailCode: true,
     hasTenantCreation: true,
     hasIdentitySessions: true,
     hasApiKeys: true,
@@ -127,21 +127,31 @@ const routes: Array<{
     authorization: string | null;
 }> = [
     {
-        name: "signIn",
-        answer: signedIn(),
-        call: (a) => a.signIn({ emailAddress: "a@b.c", password: "pw" }),
+        name: "requestEmailCode",
+        answer: noContent(),
+        call: (a) => a.requestEmailCode("a@b.c"),
         method: "POST",
-        url: "https://api.example.com/auth/login",
-        body: '{"emailAddress":"a@b.c","password":"pw"}',
+        url: "https://api.example.com/auth/email-code",
+        body: '{"emailAddress":"a@b.c"}',
         authorization: null,
     },
     {
-        name: "login",
+        name: "signIn",
         answer: signedIn(),
-        call: (a) => a.login({ emailAddress: "a@b.c", password: "pw" }),
+        call: (a) => a.signIn({ emailAddress: "a@b.c", code: "012345" }),
         method: "POST",
-        url: "https://api.example.com/auth/login",
-        body: '{"emailAddress":"a@b.c","password":"pw"}',
+        url: "https://api.example.com/auth/email-code/verify",
+        body: '{"emailAddress":"a@b.c","code":"012345"}',
+        authorization: null,
+    },
+    {
+        name: "verifyEmailCode",
+        answer: signedIn(),
+        call: (a) =>
+            a.verifyEmailCode({ emailAddress: "a@b.c", code: "012345" }),
+        method: "POST",
+        url: "https://api.example.com/auth/email-code/verify",
+        body: '{"emailAddress":"a@b.c","code":"012345"}',
         authorization: null,
     },
     {
@@ -162,20 +172,7 @@ const routes: Array<{
         body: '{"refreshToken":"rt-9"}',
         authorization: null,
     },
-    {
-        name: "register",
-        answer: signedIn(),
-        call: (a) =>
-            a.register({
-                emailAddress: "a@b.c",
-                displayName: "A",
-                password: "pw",
-            }),
-        method: "POST",
-        url: "https://api.example.com/auth/register",
-        body: '{"emailAddress":"a@b.c","displayName":"A","password":"pw"}',
-        authorization: null,
-    },
+
     {
         name: "provision",
         answer: json({ id: "acct" }),
@@ -186,32 +183,24 @@ const routes: Array<{
         authorization: BEARER_1,
     },
     {
-        name: "requestPasswordReset",
-        answer: noContent(),
-        call: (a) => a.requestPasswordReset("a@b.c"),
+        name: "invite",
+        answer: json({ id: "inv" }),
+        call: (a) => a.invite({ emailAddress: "a@b.c", role: "Admin" }),
         method: "POST",
-        url: "https://api.example.com/auth/password/reset",
-        body: '{"emailAddress":"a@b.c"}',
-        authorization: null,
-    },
-    {
-        name: "confirmPasswordReset",
-        answer: noContent(),
-        call: (a) => a.confirmPasswordReset("tok", "new-pw"),
-        method: "POST",
-        url: "https://api.example.com/auth/password/reset/confirm",
-        body: '{"token":"tok","newPassword":"new-pw"}',
-        authorization: null,
-    },
-    {
-        name: "changePassword",
-        answer: pair(),
-        call: (a) =>
-            a.changePassword({ currentPassword: "a", newPassword: "b" }),
-        method: "POST",
-        url: "https://api.example.com/auth/password/change",
-        body: '{"currentPassword":"a","newPassword":"b"}',
+        url: "https://api.example.com/auth/invitations",
+        body: '{"emailAddress":"a@b.c","role":"Admin"}',
         authorization: BEARER_1,
+    },
+    {
+        name: "previewInvitation",
+        answer: json({ id: "inv", tenantName: "Skolan i Solna" }),
+        call: (a) => a.previewInvitation("tok"),
+        method: "GET",
+        url: "https://api.example.com/auth/invitations/preview?token=tok",
+        body: null,
+        // No credential: this is what a landing page calls before anybody has
+        // signed in, which is the whole reason the route exists.
+        authorization: null,
     },
     {
         name: "verifyEmail",
@@ -485,7 +474,7 @@ describe("credentials", () => {
         const { rt, attempts, auth } = harness([signedIn()]);
         signIn(rt, { expiresAt: STALE });
 
-        await auth.login({ emailAddress: "a@b.c", password: "pw" });
+        await auth.verifyEmailCode({ emailAddress: "a@b.c", code: "012345" });
 
         expect(attempts).toHaveLength(1);
         expect(attempts[0]!.headers.get("Authorization")).toBeNull();
@@ -520,7 +509,7 @@ describe("credentials", () => {
         rt.use(undefined);
 
         await auth.signIn(
-            { emailAddress: "a@b.c", password: "pw" },
+            { emailAddress: "a@b.c", code: "012345" },
             auth.withTenant("t-1"),
         );
 
@@ -533,7 +522,7 @@ describe("what a call does to the session afterwards", () => {
         const { rt, auth } = harness([json({ accessToken: "at-2" })]);
         const session = signIn(rt, { refreshToken: "rt-theirs" });
 
-        await auth.signIn({ emailAddress: "a@b.c", password: "pw" });
+        await auth.signIn({ emailAddress: "a@b.c", code: "012345" });
 
         // A pair with no refresh token must not pick up one that would refresh
         // the client back into whoever was signed in before.
@@ -545,11 +534,11 @@ describe("what a call does to the session afterwards", () => {
         const { rt, auth } = harness([json({ accessToken: "at-2" })]);
         const session = signIn(rt, { refreshToken: "rt-mine" });
 
-        await auth.changePassword({ currentPassword: "a", newPassword: "b" });
+        await auth.switchTenant("t-2");
 
-        // The mirror image of the case above: a password change is the same
-        // person, and dropping the refresh token would end the session at the
-        // next expiry.
+        // The mirror image of the case above: switching tenants is the same
+        // person continuing, and dropping the refresh token would end the
+        // session at the next expiry.
         expect(session.getTokens().refreshToken).toBe("rt-mine");
     });
 
@@ -559,7 +548,7 @@ describe("what a call does to the session afterwards", () => {
         const seen: Array<string | undefined> = [];
         session.onTokens = (t) => seen.push(t.accessToken);
 
-        await auth.signIn({ emailAddress: "a@b.c", password: "pw" });
+        await auth.signIn({ emailAddress: "a@b.c", code: "012345" });
 
         expect(rt.getCredential()).toBe(session);
         expect(seen).toEqual(["at-2"]);
@@ -614,7 +603,7 @@ describe("what a call does to the session afterwards", () => {
         // Let the request go out carrying the credential it is ending.
         await Promise.resolve();
 
-        await auth.signIn({ emailAddress: "b@c.d", password: "pw" });
+        await auth.signIn({ emailAddress: "b@c.d", code: "012345" });
         expect(session.getTokens().accessToken).toBe("at-2");
 
         release(noContent());
@@ -624,7 +613,7 @@ describe("what a call does to the session afterwards", () => {
     });
 
     it("does not hand a reissued pair to whoever signed in meanwhile", async () => {
-        // The mirror image: a password change is the same person continuing, so
+        // The mirror image: switching tenants is the same person continuing, so
         // its pair is adopted — but only by the person who asked for it. On the
         // new occupant it would be the previous one's credential.
         let release!: (r: Response) => void;
@@ -634,16 +623,13 @@ describe("what a call does to the session afterwards", () => {
         const { rt, auth } = harness([() => pending, signedIn()]);
         const session = signIn(rt);
 
-        const changed = auth.changePassword({
-            currentPassword: "a",
-            newPassword: "b",
-        });
+        const switched = auth.switchTenant("t-2");
         await Promise.resolve();
 
-        await auth.signIn({ emailAddress: "b@c.d", password: "pw" });
+        await auth.signIn({ emailAddress: "b@c.d", code: "012345" });
 
         release(json({ accessToken: "at-theirs", refreshToken: "rt-theirs" }));
-        await changed;
+        await switched;
 
         expect(session.getTokens().accessToken).toBe("at-2");
     });
@@ -669,7 +655,7 @@ describe("what a call does to the session afterwards", () => {
 describe("routes this project does not mount", () => {
     const off: AuthProfile = {
         ...profile,
-        hasRegistration: false,
+        hasEmailCode: false,
         hasTenantCreation: false,
         hasIdentitySessions: false,
         hasApiKeys: false,
@@ -678,12 +664,15 @@ describe("routes this project does not mount", () => {
     const gated: Array<{ name: string; call: (a: Auth) => Promise<unknown> }> =
         [
             {
-                name: "register",
+                name: "requestEmailCode",
+                call: (a) => a.requestEmailCode("a@b.c"),
+            },
+            {
+                name: "verifyEmailCode",
                 call: (a) =>
-                    a.register({
+                    a.verifyEmailCode({
                         emailAddress: "a@b.c",
-                        displayName: "A",
-                        password: "pw",
+                        code: "012345",
                     }),
             },
             {

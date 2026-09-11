@@ -4,20 +4,20 @@ import type {
     APIKeyView,
     AuthLogEntryView,
     AuthPage,
-    ChangePasswordRequest,
     CreateKeyRequest,
     CreateKeyResponse,
     CreateTenantRequest,
+    InvitationPreview,
     InvitationToMeView,
     InvitationView,
+    InviteRequest,
     List,
-    LoginRequest,
     ProvisionRequest,
-    RegisterRequest,
     SessionView,
     SignInResponse,
     TenantView,
     TokenPair,
+    VerifyEmailCodeRequest,
 } from "./authwire.js";
 import type { Credential } from "./credential.js";
 import type { AuthProfile, Runtime } from "./runtime.js";
@@ -116,7 +116,7 @@ export class Auth {
      * Names the tenant a call is for, in the header this project reads.
      *
      * Only consulted where the tenant cannot be known some other way — a
-     * sign-in, a password reset. Once there is a session the tenant comes from
+     * sign-in, a code request. Once there is a session the tenant comes from
      * the token.
      *
      * ```ts
@@ -849,9 +849,9 @@ export class Auth {
     /**
      * Hands a newly issued pair to the session already installed.
      *
-     * What a refresh, a tenant switch, a password change and an impersonation
-     * produce: the same person — or the same client — continuing, so a response
-     * that carried no refresh token keeps the one in hand.
+     * What a refresh, a tenant switch and an impersonation produce: the same
+     * person — or the same client — continuing, so a response that carried no
+     * refresh token keeps the one in hand.
      *
      * `held` is who that was when the call went out. A pair that arrives after
      * somebody else has signed in is dropped rather than handed over: it would

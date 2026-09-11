@@ -108,17 +108,18 @@ func (h *Handler) Mount(mux *http.ServeMux) {
 	mux.HandleFunc("GET /ui", h.page)
 	mux.HandleFunc("GET /ui/", h.page)
 
-	mux.HandleFunc("POST /ui/register", h.register)
-	mux.HandleFunc("POST /ui/signup", h.signUp)
+	// The two halves of the only way in: ask for a code, then type it back.
+	mux.HandleFunc("POST /ui/code", h.requestCode)
+	mux.HandleFunc("POST /ui/signin", h.signIn)
 	// The picker's two exits: join a tenant you were invited to, or make one.
 	mux.HandleFunc("POST /ui/join", h.join)
 	mux.HandleFunc("POST /ui/tenants", h.createTenant)
-	mux.HandleFunc("POST /ui/login", h.login)
 	mux.HandleFunc("POST /ui/logout", h.logout)
 	mux.HandleFunc("POST /ui/switch", h.switchTenant)
 	mux.HandleFunc("POST /ui/refresh", h.refresh)
 
 	mux.HandleFunc("POST /ui/invite", h.invite)
+	mux.HandleFunc("POST /ui/invite/preview", h.preview)
 	mux.HandleFunc("POST /ui/accept", h.accept)
 	mux.HandleFunc("POST /ui/invite/revoke", h.revokeInvite)
 
@@ -327,13 +328,13 @@ func (e entry) Curl(base string) string {
 	return b.String()
 }
 
-// redact keeps a password out of a transcript.
+// redact keeps a live secret out of a transcript.
 func redact(body string) string {
 	var m map[string]any
 	if err := json.Unmarshal([]byte(body), &m); err != nil {
 		return body
 	}
-	for _, key := range []string{"password", "newPassword", "currentPassword"} {
+	for _, key := range []string{"code", "token"} {
 		if _, ok := m[key]; ok {
 			m[key] = "…"
 		}

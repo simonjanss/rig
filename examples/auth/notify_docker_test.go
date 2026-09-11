@@ -138,7 +138,6 @@ func TestTheInboxRoutesAnswerOnlyTheCaller(t *testing.T) {
 	author := api.accountID(t, tenant, SeedEmail)
 	reader := api.addAccount(t, tenant, "reader2")
 	readerEmail := api.emailOf(t, reader)
-	api.setPassword(t, readerEmail, SeedPassword)
 	api.grantEverything(t, tenant, reader)
 
 	ctx := tenancy.NewContext(context.Background(),
@@ -151,8 +150,8 @@ func TestTheInboxRoutesAnswerOnlyTheCaller(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	readerToken := api.login(t, tenant, readerEmail, SeedPassword)
-	ownerToken := api.login(t, tenant, SeedEmail, SeedPassword)
+	readerToken := api.login(t, tenant, readerEmail)
+	ownerToken := api.login(t, tenant, SeedEmail)
 
 	t.Run("the badge counts what is unread", func(t *testing.T) {
 		res := api.do(t, request{method: http.MethodGet, path: "/notifications/_unread-count",
@@ -240,7 +239,7 @@ func TestDeletingANoteTakesItsNotifications(t *testing.T) {
 // notifications builds the engine the same way main does.
 func (s *server) notifications(t *testing.T) (*notify.Engine, *notify.Service) {
 	t.Helper()
-	_, front, engine, err := newAPI(context.Background(), s.pool, baseURL(), slog.Default())
+	_, front, engine, _, err := newAPI(context.Background(), s.pool, baseURL(), slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}

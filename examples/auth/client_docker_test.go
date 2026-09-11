@@ -41,14 +41,20 @@ func newSDK(t *testing.T, now func() time.Time) (*client.Client, *server, uuid.U
 	return c, srv, tenant
 }
 
-// signIn is the whole sign-in, as an SDK caller writes it: one call, and from
-// here on every request carries the session.
-func signIn(t *testing.T, c *client.Client, tenant uuid.UUID) *authwire.SignInResponse {
+// signIn is the whole sign-in, as an SDK caller writes it: ask for a code, read
+// it out of the example's mailbox, and type it back. From the second call on
+// every request carries the session.
+func signIn(t *testing.T, c *client.Client, srv *server, tenant uuid.UUID) *authwire.SignInResponse {
 	t.Helper()
 
-	res, err := c.Auth.SignIn(t.Context(), authwire.LoginRequest{
+	if err := c.Auth.RequestEmailCode(t.Context(), SeedEmail,
+		c.Auth.WithTenant(tenant)); err != nil {
+		t.Fatal(err)
+	}
+
+	res, err := c.Auth.SignIn(t.Context(), authwire.VerifyEmailCodeRequest{
 		EmailAddress: SeedEmail,
-		Password:     SeedPassword,
+		Code:         srv.codeFor(t, SeedEmail),
 	}, c.Auth.WithTenant(tenant))
 	if err != nil {
 		t.Fatal(err)
@@ -60,10 +66,10 @@ func signIn(t *testing.T, c *client.Client, tenant uuid.UUID) *authwire.SignInRe
 }
 
 func TestSDKSignsInAndCalls(t *testing.T) {
-	c, _, tenant := newSDK(t, nil)
+	c, srv, tenant := newSDK(t, nil)
 	ctx := t.Context()
 
-	res := signIn(t, c, tenant)
+	res := signIn(t, c, srv, tenant)
 
 	// The session is installed, so nothing below mentions a token.
 	if _, ok := c.Runtime().Session(); !ok {
@@ -111,10 +117,10 @@ func TestSDKRefreshesAheadOfExpiry(t *testing.T) {
 	// A clock the test owns, starting now and moved forward by hand.
 	base := time.Now()
 	offset := time.Duration(0)
-	c, _, tenant := newSDK(t, func() time.Time { return base.Add(offset) })
+	c, srv, tenant := newSDK(t, func() time.Time { return base.Add(offset) })
 	ctx := t.Context()
 
-	signIn(t, c, tenant)
+	signIn(t, c, srv, tenant)
 	session, _ := c.Runtime().Session()
 	first := session.Tokens().AccessToken
 
@@ -147,7 +153,7 @@ func TestSDKMintsAndUsesAnAPIKey(t *testing.T) {
 	c, srv, tenant := newSDK(t, nil)
 	ctx := t.Context()
 
-	signIn(t, c, tenant)
+	signIn(t, c, srv, tenant)
 
 	minted, err := c.Auth.CreateAPIKey(ctx, authwire.CreateKeyRequest{
 		Name:   "the nightly import",
@@ -207,10 +213,10 @@ func TestSDKMintsAndUsesAnAPIKey(t *testing.T) {
 // are the SDK's: the picker reads through the identity token, and a switch
 // replaces the session in place so the calls after it need no new argument.
 func TestSDKSwitchesTenant(t *testing.T) {
-	c, _, tenant := newSDK(t, nil)
+	c, srv, tenant := newSDK(t, nil)
 	ctx := t.Context()
 
-	res := signIn(t, c, tenant)
+	res := signIn(t, c, srv, tenant)
 
 	if _, err := c.Notes.Create(ctx, client.NoteCreateInput{Title: "in the first tenant"}); err != nil {
 		t.Fatal(err)
