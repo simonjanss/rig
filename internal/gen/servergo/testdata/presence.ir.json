@@ -2916,7 +2916,7 @@
           "window": "1h"
         },
         "email_code_ip": {
-          "max": 20,
+          "max": 100,
           "window": "1h"
         },
         "verification_resend": {

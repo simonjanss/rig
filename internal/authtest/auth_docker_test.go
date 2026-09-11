@@ -14,6 +14,7 @@ package authtest
 import (
 	"bytes"
 	"context"
+	"crypto/rand"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -74,6 +75,10 @@ type harness struct {
 	// is under test here is that the check reads the claims — not where an
 	// application chose to keep its roles.
 	held map[string]bool
+
+	// source is where this harness's requests appear to come from, so that one
+	// test cannot spend another's rate-limit budget.
+	source string
 
 	// tenants are the hooks the auth package is configured with, and build makes
 	// a service using them. A test that changes the policy calls rebuild.
@@ -199,6 +204,13 @@ func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, _ *acc
 	return nil
 }
 
+// randomSource is an address in the documentation range, one per harness.
+func randomSource() string {
+	b := make([]byte, 2)
+	_, _ = rand.Read(b)
+	return fmt.Sprintf("198.51.100.%d", 1+int(b[0])%254)
+}
+
 func setup(t *testing.T) *harness {
 	t.Helper()
 
@@ -210,6 +222,7 @@ func setup(t *testing.T) *harness {
 		notify: &notifier{},
 		tenant: uuid.New(),
 		email:  "sam-" + uuid.NewString()[:8] + "@example.com",
+		source: randomSource(),
 	}
 	h.stores = authpg.New(pool)
 
@@ -300,6 +313,14 @@ func setup(t *testing.T) *harness {
 				return h.tenant, nil
 			},
 			Identities: identities,
+			// Loopback, so the X-Forwarded-For every request here carries is
+			// believed. A deployment behind a proxy names its ranges the same
+			// way; one that names none reads the connection, which is the safe
+			// default and the reason this has to be said.
+			TrustedProxies: []netip.Prefix{
+				netip.MustParsePrefix("127.0.0.0/8"),
+				netip.MustParsePrefix("::1/128"),
+			},
 			// The other picker exit. The auth package writes the tenant and the
 			// first account itself; a suite that wants to see the route work only has
 			// to say the route exists.
@@ -396,6 +417,12 @@ func (h *harness) doWith(t *testing.T, method, path, token, body string, headers
 		t.Fatal(err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	// A source address of this harness's own. Every test in this package talks
+	// to a loopback server, so without it they share one rate-limit budget —
+	// and the per-source code limit is real enough that the suite would spend
+	// it on itself. Believed because the harness names loopback as a trusted
+	// proxy, which is the same arrangement a deployment behind one has.
+	req.Header.Set("X-Forwarded-For", h.source)
 	if token != "" {
 		req.Header.Set("Authorization", "Bearer "+token)
 	}
@@ -1640,8 +1667,8 @@ func TestSigningInWithNoTenant(t *testing.T) {
 		p := h.login(t)
 		// Inviting is provisioning with a link: the account is made and a
 		// single-use token is sent, rather than a password being set for somebody.
-		res := h.do(t, "POST", "/auth/accounts", p.AccessToken,
-			`{"emailAddress":"`+stranger+`","displayName":"Wanderer","invite":true}`)
+		res := h.do(t, "POST", "/auth/invitations", p.AccessToken,
+			`{"emailAddress":"`+stranger+`","displayName":"Wanderer"}`)
 		if res.status != http.StatusCreated {
 			t.Fatalf("invite: %d %s", res.status, res.body)
 		}
@@ -1697,8 +1724,8 @@ func TestLeavingThePicker(t *testing.T) {
 		t.Helper()
 		address = "newcomer-" + uuid.New().String()[:8] + "@example.com"
 		res := h.signUp(t, address)
-		if res.status != http.StatusCreated {
-			t.Fatalf("register: %d %s", res.status, res.body)
+		if res.status != http.StatusOK {
+			t.Fatalf("sign in: %d %s", res.status, res.body)
 		}
 		var out struct {
 			IdentityToken string `json:"identityToken"`
@@ -1723,8 +1750,8 @@ func TestLeavingThePicker(t *testing.T) {
 		// Invited into the harness's tenant by somebody who may.
 		grant(t, h, account.PermissionProvision)
 		p := h.login(t)
-		if res := h.do(t, "POST", "/auth/accounts", p.AccessToken,
-			`{"emailAddress":"`+email+`","displayName":"Newcomer","invite":true}`); res.status != http.StatusCreated {
+		if res := h.do(t, "POST", "/auth/invitations", p.AccessToken,
+			`{"emailAddress":"`+email+`","displayName":"Newcomer"}`); res.status != http.StatusCreated {
 			t.Fatalf("invite: %d %s", res.status, res.body)
 		}
 
@@ -2144,8 +2171,8 @@ func TestTheTenantHooks(t *testing.T) {
 	newcomer := func(t *testing.T, at string) string {
 		t.Helper()
 		res := h.signUp(t, at)
-		if res.status != http.StatusCreated {
-			t.Fatalf("register: %d %s", res.status, res.body)
+		if res.status != http.StatusOK {
+			t.Fatalf("sign in: %d %s", res.status, res.body)
 		}
 		var out struct {
 			IdentityToken string `json:"identityToken"`

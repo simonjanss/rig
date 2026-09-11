@@ -102,7 +102,14 @@ func Standard() Defaults {
 			// Not cleared by anything, and the counted event is not a failure:
 			// what is being bounded is how many codes one place may ask for,
 			// and a code that was delivered counts as much as one that was not.
-			Max:    20,
+			//
+			// Loose, for the reason LoginByIP is loose: a shared office is one
+			// address, and thirty people arriving on a Monday would trip
+			// anything tighter. It is still a hard ceiling on how fast one
+			// source can make identities when provisioning is on — which is
+			// what this limit is for — and the per-address limit beside it is
+			// the tight one.
+			Max:    100,
 			Window: time.Hour,
 		},
 		VerificationResend: Limit{
