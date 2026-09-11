@@ -181,7 +181,7 @@ export class Auth {
      * have accounts. What it does report is a rate-limit refusal, which is
      * about how often you have asked rather than about the address.
      */
-    requestEmailCode(
+    async requestEmailCode(
         emailAddress: string,
         opts: CallOptions = {},
     ): Promise<void> {
@@ -225,7 +225,7 @@ export class Auth {
     }
 
     /** Signs in with a code and hands back the answer without installing it. */
-    verifyEmailCode(
+    async verifyEmailCode(
         input: VerifyEmailCodeRequest,
         opts: CallOptions = {},
     ): Promise<SignInResponse> {

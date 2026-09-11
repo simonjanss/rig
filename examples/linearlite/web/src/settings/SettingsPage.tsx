@@ -27,9 +27,6 @@ export function SettingsPage() {
     const [invitee, setInvitee] = useState("");
     const [inviting, setInviting] = useState(false);
     const [pending, setPending] = useState<InvitationView[]>([]);
-    const [current, setCurrent] = useState("");
-    const [next, setNext] = useState("");
-    const [changing, setChanging] = useState(false);
     const { push } = useToasts();
 
     const refresh = () => {
@@ -80,18 +77,17 @@ export function SettingsPage() {
             // A display name has to be something, and the local part is the
             // best guess an invitation form has. The person renames themselves
             // when they arrive.
-            const acct = await client.auth.provision({
+            const invitation = await client.auth.invite({
                 emailAddress: address,
                 displayName: address.split("@")[0] || address,
                 role: "Basic",
-                invite: true,
             });
             setInvitee("");
             refresh();
             push({
                 kind: "info",
-                title: `Invited ${acct.emailAddress}`,
-                detail: "The link is in the Outbox.",
+                title: `Invited ${invitation.emailAddress}`,
+                detail: "The link is in the Outbox. They are not a member until they follow it.",
             });
         } catch (err) {
             push({
@@ -119,34 +115,6 @@ export function SettingsPage() {
                 title: "Could not withdraw it",
                 detail: err instanceof Error ? err.message : String(err),
             });
-        }
-    }
-
-    async function change() {
-        setChanging(true);
-        try {
-            // The pair that comes back is the session this tab is holding,
-            // reissued, and the client adopts it: that is what keeps this tab
-            // signed in while every other one is not.
-            await client.auth.changePassword({
-                currentPassword: current,
-                newPassword: next,
-            });
-            setCurrent("");
-            setNext("");
-            push({
-                kind: "info",
-                title: "Password changed",
-                detail: "Every other session has been signed out.",
-            });
-        } catch (err) {
-            push({
-                kind: "error",
-                title: "Could not change it",
-                detail: err instanceof Error ? err.message : String(err),
-            });
-        } finally {
-            setChanging(false);
         }
     }
 
@@ -230,9 +198,10 @@ export function SettingsPage() {
 
             <h2 className="settings-second">Invite a teammate</h2>
             <p className="detail-quiet">
-                One call — <code>POST /auth/accounts</code> with{" "}
-                <code>invite: true</code> — creates the account and mints a link
-                for the person to set a password with. It needs{" "}
+                One call — <code>POST /auth/invitations</code> — and it creates
+                nothing here. Accepting is what makes somebody a member, so
+                until they follow the link they are not in this workspace, not
+                counted, and nothing is scoped to them. It needs{" "}
                 <code>account.provision</code>, which the Owner role holds and
                 the Basic one does not, so a member trying this gets a 403 and
                 that is the permission model working rather than a bug.
@@ -262,9 +231,9 @@ export function SettingsPage() {
                 <>
                     <h3 className="settings-third">Not yet accepted</h3>
                     <p className="detail-quiet">
-                        Sent and still live. Withdrawing one stops its link
-                        working, which is the half of inviting that matters
-                        after somebody leaves before they arrive.
+                        Sent and still live, and nobody on this list is in the
+                        workspace. Withdrawing one stops its link working, and
+                        removes nothing — because there was nothing to remove.
                     </p>
                     {pending.map((i) => (
                         <div className="security-row" key={i.id}>
@@ -294,37 +263,6 @@ export function SettingsPage() {
             )}
 
             <NotificationSettings />
-
-            <h2 className="settings-second">Change your password</h2>
-            <p className="detail-quiet">
-                The policy is <code>auth.password</code> in rig.yaml and it is
-                enforced on the server, so what comes back from a refusal is the
-                reason. Setting a password revokes every session the identity
-                had — this tab keeps working because the endpoint answers with a
-                replacement pair for the one that asked, and every other tab is
-                signed out.
-            </p>
-            <div className="settings-mint">
-                <input
-                    type="password"
-                    value={current}
-                    onChange={(e) => setCurrent(e.target.value)}
-                    placeholder="current password"
-                />
-                <input
-                    type="password"
-                    value={next}
-                    onChange={(e) => setNext(e.target.value)}
-                    placeholder="new password"
-                />
-                <button
-                    className="primary"
-                    disabled={changing || !current || !next}
-                    onClick={() => void change()}
-                >
-                    Change it
-                </button>
-            </div>
         </div>
     );
 }

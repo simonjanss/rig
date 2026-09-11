@@ -15,7 +15,7 @@ import { send } from "@rig-ts/client";
 
 export type OutboxKind =
     | "Invitation"
-    | "PasswordReset"
+    | "EmailCode"
     | "EmailVerification"
     | "Notification";
 

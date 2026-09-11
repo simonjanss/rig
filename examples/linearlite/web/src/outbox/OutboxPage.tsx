@@ -8,8 +8,9 @@ import { readOutbox } from "./outboxApi.js";
 
 /** What each kind is, in one line, because the kind alone does not say. */
 const WHAT: Record<OutboxMessage["kind"], string> = {
-    Invitation: "A link that joins somebody to this workspace.",
-    PasswordReset: "A link that sets a new password, once.",
+    Invitation:
+        "A link that joins somebody to this workspace. Nobody is a member until they follow it.",
+    EmailCode: "A short code, typed back to sign in. It is the only way in.",
     EmailVerification: "A link that confirms the address.",
     Notification: "The email copy of an inbox line.",
 };
@@ -61,14 +62,14 @@ export function OutboxPage() {
 
             <p className="outbox-warning">
                 <strong>This screen is why it is a demo.</strong> A live
-                invitation or reset link is a credential for as long as it
+                invitation or sign-in code is a credential for as long as it
                 lives, and putting one on a page is putting a credential on a
                 page. It is here so the flows can be walked without a mail
                 server. The honest version of this screen is no screen.
             </p>
 
             <p className="outbox-sub">
-                Ask for a reset from the <Link to="/login">sign-in page</Link>,
+                Ask for a code from the <Link to="/signin">sign-in page</Link>,
                 or invite somebody from <Link to="/settings">Settings</Link>,
                 and it lands here. Change an item&rsquo;s status and the email
                 copy of the inbox line lands here too — the bell and this page
@@ -103,15 +104,9 @@ export function OutboxPage() {
                             <code>{m.token}</code>
                             <Link
                                 className="secondary outbox-open"
-                                to={
-                                    m.kind === "PasswordReset"
-                                        ? `/reset?token=${encodeURIComponent(m.token)}`
-                                        : `/login`
-                                }
+                                to="/signin"
                             >
-                                {m.kind === "PasswordReset"
-                                    ? "Use it"
-                                    : "Sign in"}
+                                Sign in
                             </Link>
                         </div>
                     )}
