@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	"github.com/simonjanss/rig/runtime/apibase"
+	"github.com/simonjanss/rig/runtime/reqlog"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -277,5 +278,43 @@ func TestAnUnknownCodeIsLevelledByItsStatus(t *testing.T) {
 	}
 	if len(failed) != 1 || failed[0] != http.StatusInternalServerError {
 		t.Errorf("reddened %v, want one span at 500", failed)
+	}
+}
+
+// And the request line reports no status at all for it, which is what the
+// abandoned line is for.
+//
+// Zero rather than 200: reqlog.Writer records what a handler wrote, and nothing
+// was written, so there is no status to report. net/http still puts its implicit
+// 200 on a socket nobody is reading, and a request line that repeated it would
+// be filing an abandoned request next to every request that succeeded — the same
+// misfiling one field over.
+func TestTheRequestLineReportsNoStatusForAnAbandonedRequest(t *testing.T) {
+	t.Parallel()
+
+	var buf bytes.Buffer
+	s := apibase.Server{Logger: logging(&buf)}
+
+	r := httptest.NewRequest(http.MethodGet, "/api/v1/todos", nil)
+	rc := apibase.RequestContext{RequestID: "req-42", Method: http.MethodGet, Route: "GET /api/v1/todos"}
+	rec := reqlog.Wrap(httptest.NewRecorder())
+
+	apibase.Fail(s, rec, r, rc, rigerr.Internal(context.Canceled, "listing todos"))
+	apibase.LogRequest(s, r, rec, rc)
+
+	lines := bytes.Split(bytes.TrimSpace(buf.Bytes()), []byte("\n"))
+	if len(lines) != 2 {
+		t.Fatalf("wrote %d lines, want the failure and the request line: %s", len(lines), buf.String())
+	}
+
+	var served line
+	if err := json.Unmarshal(lines[1], &served); err != nil {
+		t.Fatalf("decoding %q: %v", lines[1], err)
+	}
+	if served.Msg != "request served" {
+		t.Fatalf("second line is %q, want the request line", served.Msg)
+	}
+	if served.Status == nil || *served.Status != 0 {
+		t.Errorf("status = %v, want 0 — nothing was written", served.Status)
 	}
 }

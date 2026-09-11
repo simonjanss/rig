@@ -167,7 +167,10 @@ At `DEBUG`, one line per request, after the handler has finished:
 has ever fetched. That is what makes it usable as a label.
 
 `status` is what was written, which for an abandoned request is nothing — so it
-reads `200`. The line above it, `request abandoned`, is the one that says what
+reads `0`. Zero is a distinct outcome from `200` rather than the same one
+spelled differently: net/http still puts its implicit 200 on a socket nobody is
+reading, but no handler called `WriteHeader`, so nothing here saw a status to
+report. The line above it, `request abandoned`, is the one that says what
 actually happened; this one only ever reports the answer, and there was none.
 
 It is debug because it is one line per request forever. Turn it on when you are
