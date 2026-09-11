@@ -133,7 +133,7 @@ func main() {
 
 		Tasks: map[string]serve.Task{
 			"migrate": migrate.ApplyAll(migrationSources(), migrate.Options{}),
-			// Two tenants and one person with a password, so both interesting
+			// Two tenants and one person who already exists, so both interesting
 			// sign-ins are reachable: a stranger joining, and an existing account
 			// being linked.
 			"seed": seed,
@@ -363,18 +363,24 @@ func callbackURL(origin string, p oauth.Provider) string {
 }
 
 // The seed's fixed values, so the README and a test can name them.
-const (
-	// SeedEmail already has a password. Signing in with a provider as this address
-	// links the two, if the provider says the address is verified.
-	SeedEmail    = "ada@acme.test"
-	SeedPassword = "correct horse battery staple"
-)
+//
+// SeedEmail is a person who already exists here and has never confirmed the
+// address. Signing in with a provider as this address links the two — if the
+// provider says the address is verified, which is the check the whole OAuth
+// package turns on.
+const SeedEmail = "ada@acme.test"
 
 // seed makes two tenants and one person, which is the least this example needs.
 //
-// Two tenants, because one tenant cannot show that the host decides anything. One
-// person with a password, because linking an existing account is the interesting
-// half of a provider sign-in and there has to be an account to link to.
+// Two tenants, because one tenant cannot show that the host decides anything.
+// One person who already exists, because linking an existing account is the
+// interesting half of a provider sign-in and there has to be an account to link
+// to.
+//
+// Nothing is set up for her to sign in with, and there is nothing to set up:
+// this example configures a provider and no mailed code, so the provider is the
+// only door. That is the shape #165 asked for — one way in, and no second
+// surface quietly offering another.
 func seed(ctx context.Context, pool *pgxpool.Pool) error {
 	for slug, name := range map[string]string{acmeSlug: "Acme", betaSlug: "Beta"} {
 		// The unique index is on lower(slug) and partial, so ON CONFLICT has to
@@ -420,16 +426,8 @@ func seed(ctx context.Context, pool *pgxpool.Pool) error {
 		return fmt.Errorf("account: %w", err)
 	}
 
-	// Through the account service, because a hash is not a value to invent.
-	front, err := auth.New(auth.Config{Pool: pool})
-	if err != nil {
-		return err
-	}
-	if err := front.Parts().Accounts.SetPassword(ctx, identityID, SeedPassword); err != nil {
-		return fmt.Errorf("password: %w", err)
-	}
-
-	fmt.Printf("seeded %s.localhost and %s.localhost; %s / %q has a password at %s\n",
-		acmeSlug, betaSlug, SeedEmail, SeedPassword, acmeSlug)
+	fmt.Printf("seeded %s.localhost and %s.localhost; %s is an Owner at %s, "+
+		"with a provider as the only way in\n",
+		acmeSlug, betaSlug, SeedEmail, acmeSlug)
 	return nil
 }

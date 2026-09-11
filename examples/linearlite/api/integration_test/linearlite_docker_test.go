@@ -24,6 +24,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"net/url"
 	"os"
 	"testing"
 
@@ -165,15 +166,41 @@ func (s *server) seed(t *testing.T) uuid.UUID {
 	return uuid.MustParse(app.SeedTenantID)
 }
 
-// login signs a seeded person in and answers their access token.
+// codeFor asks for a sign-in code and reads it back off the demo route.
+//
+// The route is a prop and says so — see registerDemo — and this is the one
+// place in the suite that leans on it: there is no mail server, and the code
+// exists nowhere else in plaintext.
+func (s *server) codeFor(t *testing.T, email string) string {
+	t.Helper()
+
+	if res := s.do(t, request{
+		method: http.MethodPost, path: "/auth/email-code",
+		body: map[string]any{"emailAddress": email},
+	}); res.status != http.StatusNoContent {
+		t.Fatalf("asking for a code for %s: %d %s", email, res.status, res.body)
+	}
+
+	res := s.do(t, request{method: http.MethodGet, path: "/_demo/code?email=" + url.QueryEscape(email)})
+	if res.status != http.StatusOK {
+		t.Fatalf("reading the code for %s: %d %s", email, res.status, res.body)
+	}
+	var out struct {
+		Code string `json:"code"`
+	}
+	res.decode(t, &out)
+	return out.Code
+}
+
+// login signs a person in with a mailed code and answers their access token.
 func (s *server) login(t *testing.T, email string) string {
 	t.Helper()
 	res := s.do(t, request{
-		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": email, "password": app.SeedPassword},
+		method: http.MethodPost, path: "/auth/email-code/verify",
+		body: map[string]any{"emailAddress": email, "code": s.codeFor(t, email)},
 	})
 	if res.status != http.StatusOK {
-		t.Fatalf("login %s: %d %s", email, res.status, res.body)
+		t.Fatalf("sign in %s: %d %s", email, res.status, res.body)
 	}
 	var out struct {
 		AccessToken string `json:"accessToken"`

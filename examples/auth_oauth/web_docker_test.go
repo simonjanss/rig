@@ -147,7 +147,7 @@ func TestSigningInWithAProvider(t *testing.T) {
 	t.Run("an unverified address will not link an existing account", func(t *testing.T) {
 		ui := newBrowser(t)
 
-		// The seed gave this address a password in Acme. Arriving through a
+		// The seed gave this address an account in Acme. Arriving through a
 		// provider that will not vouch for it is the attack the check exists for:
 		// without it, whoever registers your address anywhere owns your account
 		// here.
@@ -330,7 +330,7 @@ func newBrowserAt(t *testing.T, primary string) *browser {
 	}
 	t.Cleanup(pool.Close)
 
-	// The two tenants, and the person with a password. The same function the
+	// The two tenants, and the person who already exists. The same function the
 	// server runs at startup, and idempotent, so a repeated run is free.
 	if err := seed(ctx, pool); err != nil {
 		t.Fatal(err)

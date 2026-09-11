@@ -20,7 +20,6 @@ const (
 	SeedTenantID = "00000000-0000-0000-0000-000000000001"
 	SeedEmail    = "demo@linearlite.dev"
 	SeedEmail2   = "alex@linearlite.dev"
-	SeedPassword = "correct horse battery staple"
 )
 
 // seed creates the demo tenant, two people to sign in as, the level roles,
@@ -86,28 +85,11 @@ func Seed(ctx context.Context, pool *pgxpool.Pool) error {
 		return err
 	}
 
-	// Passwords last, and through the service. Setting one revokes the
-	// identity's sessions, which for a fresh seed is a no-op and for a re-run
-	// is the least surprising reading of "reset the demo".
-	accounts, err := accountService(pool)
-	if err != nil {
-		return err
-	}
-	for _, p := range []struct{ email string }{{SeedEmail}, {SeedEmail2}} {
-		var identityID uuid.UUID
-		if err := pool.QueryRow(ctx, `
-			SELECT id FROM rig_identity
-			 WHERE lower(email_address) = lower($1) AND deleted_at IS NULL`,
-			p.email).Scan(&identityID); err != nil {
-			return fmt.Errorf("identity %s: %w", p.email, err)
-		}
-		if err := accounts.SetPassword(ctx, identityID, SeedPassword); err != nil {
-			return fmt.Errorf("password %s: %w", p.email, err)
-		}
-	}
-
-	fmt.Printf("seeded tenant %s: sign in as %s / %q (or %s)\n",
-		SeedTenantID, SeedEmail, SeedPassword, SeedEmail2)
+	// Nothing is set up for either of them to sign in with, and there is
+	// nothing to set up: they type their address, a code is mailed, and they
+	// type it back.
+	fmt.Printf("seeded tenant %s: sign in as %s (or %s) — ask for a code\n",
+		SeedTenantID, SeedEmail, SeedEmail2)
 	return nil
 }
 
