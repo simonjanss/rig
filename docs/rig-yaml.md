@@ -582,13 +582,17 @@ See [generators.md](generators.md) for what each one accepts.
 
 ## `auth`
 
-The authentication foundation: sessions, API keys, OAuth, rate limits, password
-policy. It is off by default, and large enough to have its own page.
+The authentication foundation: sessions, API keys, OAuth, mailed sign-in codes,
+rate limits. It is off by default, and large enough to have its own page.
+
+There is no password policy, because there are no passwords. The two ways in are
+a provider and a six-digit code mailed to the address being signed in with.
 
 ```yaml
 auth:
   enabled: true
-  allow_registration: true
+  email_code:
+    enabled: true
   tenant:
     from: [host]
 ```

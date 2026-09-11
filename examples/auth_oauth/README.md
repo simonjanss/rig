@@ -12,7 +12,7 @@ Two tenants are seeded, and each answers at its own address:
 
 | | |
 |---|---|
-| `http://acme.localhost:8083` | Acme, where `ada@acme.test` already has a password |
+| `http://acme.localhost:8083` | Acme, where `ada@acme.test` already has an account |
 | `http://beta.localhost:8083` | Beta, where nobody is yet |
 
 `*.localhost` resolves to `127.0.0.1` without touching `/etc/hosts`, which is the
@@ -63,7 +63,7 @@ example is: three hosts, three tenants, and nothing on the page that names one.
 
 **The other shape is `examples/auth`.** One host, no tenant named anywhere, and
 the question settled after the callback from the person's own memberships — the
-way `POST /auth/login` has always settled it. A stranger who signs in there gets
+way every other sign-in settles it. A stranger who signs in there gets
 an identity and an account nowhere, and lands in the tenant picker. Neither
 example is the general case: a deployment has a host to read or it does not, and
 the two halves are what those two answers look like.
@@ -206,7 +206,7 @@ GitHub ship in `auth/oauth`.
 
 ### What linking means with a real provider
 
-`ada@acme.test` has a password here, and a provider sign-in as an address that
+`ada@acme.test` has an account here, and a provider sign-in as an address that
 already has an account links the two — but only when the provider says the address
 is **verified**. Google reports that per address. Microsoft's userinfo does not
 report it at all, and `auth/oauth` treats an address in a directory Microsoft

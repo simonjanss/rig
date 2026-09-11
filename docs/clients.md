@@ -563,10 +563,17 @@ const todo = await client.todos.create({ title: "write it down" });
 It is there for a project with an `auth:` block and absent for one without, so
 reaching for it in a client that has none is a type error rather than a 404.
 
+Two calls, because there are two halves and a mailbox between them: rig mails a
+short code and the second call types it back. There is no password anywhere.
+
 ```ts
+// Always resolves, registered or not: any difference would make this endpoint a
+// list of who has an account here.
+await client.auth.requestEmailCode("someone@example.com");
+
 await client.auth.signIn({
     emailAddress: "someone@example.com",
-    password,
+    code,
     client: "web",
 });
 
@@ -596,7 +603,7 @@ without the round trip.
 Because the object is reused, each of these calls only acts on the credential it
 went out with. Firing `logout()` without awaiting it is fine: if somebody signs
 in before the answer arrives, the answer is dropped rather than emptying the
-session that sign-in installed. A pair from a password change or a tenant switch
+session that sign-in installed. A pair from a tenant switch or an impersonation
 is treated the same way.
 
 Five of these routes take the *identity* token rather than the session, and take
@@ -606,7 +613,7 @@ workspaces, or none yet. They are `myTenants`, `myInvitations`,
 `acceptMyInvitation`, `endIdentitySession` and `createTenant`.
 
 ```ts
-const res = await client.auth.signIn({ emailAddress, password, client: "web" });
+const res = await client.auth.signIn({ emailAddress, code, client: "web" });
 if (!res.accessToken) {
     // No session: they belong to no tenant yet.
     const waiting = await client.auth.myInvitations(res.identityToken);
@@ -645,8 +652,15 @@ between, so the request is made in the URL and the server carries it across the
 round trip in its signed state cookie.
 
 A route the project does not mount is refused before the request goes out,
-naming the setting that would open it — `register` without
-`auth.allow_registration`, `createTenant` without `auth.allow_tenant_creation`.
+naming the setting that would open it — `requestEmailCode` without
+`auth.email_code.enabled`, `createTenant` without `auth.allow_tenant_creation`.
+
+One route takes no credential at all and is worth knowing about separately:
+`previewInvitation(token)` asks what an invitation link is for. It is what a
+landing page calls with the token out of its own URL, before anybody has signed
+in, so that it can say who invited you and where instead of showing a bare
+sign-in box. The address it answers with is masked, and every way the token can
+be wrong is the same 404.
 
 > The wire shapes are `runtime/authwire`'s, hand-written on both ends rather
 > than generated, because these are rig's own routes: the same thirty in every

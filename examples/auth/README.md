@@ -41,7 +41,7 @@ a terminal:
 │ Written by the      │ Nightly import      │ │ 201 POST /api/v1/notes    │
 │ nightly import      │  note.write         │ │             ↑ api key     │
 │  by Nightly import  │ Personal automation │ │ 200 GET  /auth/tenants    │
-│  [through Nightly…] │  note.write         │ │ 200 POST /auth/login      │
+│  [through Nightly…] │  note.write         │ │ 200 POST /auth/email-code │
 ├ People here ────────┼ Active sessions ────┤ │                           │
 │ Ada       Owner you │ 019fc785  Web  this │ │ curl -i -X POST \         │
 │ Grace     Admin     │  started 2m ago     │ │   …/api/v1/notes \        │
@@ -53,17 +53,19 @@ What it demonstrates, in the order it is worth clicking:
 
 | | |
 |---|---|
-| **Create a tenant** | A tenant, an identity, an Owner account and a role, in one transaction. No endpoint does this — see below. |
+| **Sign in with a code** | Type an address, read the code out of the outbox panel, type it back. There is no password anywhere and no screen for one. |
+| **Create a tenant** | A tenant, an Owner account and a role, in one transaction, from the picker you land in. |
 | **Write a note** | `note.write`, checked in the service's own hook. |
 | **Mint an API key** | Integration or personal, with scopes. The secret appears once. |
 | **Write a note with the key** | And watch the row say *by Nightly import, through Nightly import* — the account it acted as and the credential it came through. |
 | **Invite somebody** | A single-use link lands in the outbox panel, because there is no mail server. |
-| **Accept the invitation** | Unauthenticated, in a fresh browser: sets a first password, confirms the address, returns a session. |
-| **Or withdraw it** | Kills the link *and* removes the account it made, so the same person can be invited again. Only while it is unaccepted — once somebody has arrived, removing them is a different decision. |
-| **Be in two tenants** | Sign up again with the same address and the switcher appears — Owner in one, Admin in the other, one password. |
+| **Look at it first** | `GET /auth/invitations/preview` with no credential at all: who invited you and where, with the address masked. It spends nothing. |
+| **Accept the invitation** | Unauthenticated, in a fresh browser. **Accepting is what creates the account** — until then nobody was a member. |
+| **Or withdraw it** | Kills the link, and removes nothing, because nothing was created. |
+| **Be in two tenants** | Make a tenant of your own and the switcher appears — Owner in one, Admin in the other, one address. |
 | **Read the auth log** | Every attempt, rotation, invitation and lockout, newest first. |
 | **Rotate the tokens** | The pair is consumed and replaced; replaying the old refresh token revokes the family. |
-| **Try six wrong passwords** | The seventh is a 429 with `Retry-After`, counted in the database. |
+| **Type the code wrong** | Three guesses and the code is dead; ask for another. Enough wrong sign-ins and the *address* is locked with a `Retry-After`, counted in the database. |
 | **Sign in with a provider** | Nothing on the page names a tenant. A new address lands *in the picker*: an identity, a provider link, and an account nowhere. |
 
 The panels are honest about failure, which is the part worth watching: an Admin
@@ -93,9 +95,9 @@ you is provisioning, below.
 proved they own an address. So there is nobody to have tenants yet, and asking
 which one they meant is asking a question the visitor cannot answer. The
 resolver answers `uuid.Nil`, the callback settles who they are, and where they
-go comes from their own memberships — the same three answers `POST /auth/login`
-gives after a password: the tenant they were last in, their oldest, or nowhere
-yet and here is the picker.
+go comes from their own memberships — the same three answers a code sign-in
+gives: the tenant they were last in, their oldest, or nowhere yet and here is
+the picker.
 
 The provider is a stand-in from [`examples/idp`](../idp), served by this
 application, so the button works with nothing registered anywhere. Its consent
@@ -103,8 +105,8 @@ screen lets you choose what it claims about you, which is how both branches of
 the linking rule are reachable: sign in with the address you registered with and
 the two accounts become one — **if** it says the address is verified. Turn that
 off and watch it refuse, which is the check the whole OAuth package turns on.
-Linking also records the verification, so a password account that never
-confirmed its address is confirmed from then on.
+Linking also records the verification, so somebody who asked for a code once and
+never used it is confirmed from then on.
 
 Two keys in `rig.yaml` are worth reading together:
 
@@ -131,10 +133,15 @@ appears with nothing else changing.
 ```bash
 T=00000000-0000-0000-0000-000000000001
 
-# sign in — the tenant is a header here, because login happens before there is
-# a session to read it from
-curl -s localhost:8082/auth/login -H "X-Tenant-Id: $T" \
-  -d '{"emailAddress":"ada@example.com","password":"correct horse battery staple"}'
+# ask for a code — always 204, whatever address you type
+curl -s -i localhost:8082/auth/email-code -H "X-Tenant-Id: $T" \
+  -d '{"emailAddress":"ada@example.com"}'
+# 204, and the code is in the outbox panel at /ui — there is no mail server
+
+# type it back. The tenant is a header here, because a sign-in happens before
+# there is a session to read it from
+curl -s localhost:8082/auth/email-code/verify -H "X-Tenant-Id: $T" \
+  -d '{"emailAddress":"ada@example.com","code":"123456"}'
 # {"accessToken":"rig_at_AGP4…","refreshToken":"rig_rt_AGP4…",
 #  "expiresAt":"…","refreshExpiresAt":"…","sessionId":"019fc785-…"}
 
@@ -166,7 +173,9 @@ whole block, and most of it is turning two routes on:
 ```yaml
 auth:
   enabled: true
-  allow_registration: true
+  email_code:
+    enabled: true
+    allow_provisioning: true
   allow_tenant_creation: true
   tenant:
     from: [query, header]
@@ -193,10 +202,11 @@ mux := api.Register(api.Handlers{
 })
 ```
 
-That is login, logout, refresh, password reset, email verification, the session
-list and the API keys — with argon2id hashing, mandatory rotation with reuse
-detection, and lockout counted in the database. Nothing is generated and nothing
-is yours to maintain: `internal/` in this project holds `note` and no more.
+That is the mailed-code sign-in, logout, refresh, email verification,
+invitations, the session list and the API keys — with mandatory rotation and
+reuse detection, an attempt ceiling on each code, and lockout counted in the
+database. Nothing is generated and nothing is yours to maintain: `internal/` in
+this project holds `note` and no more.
 
 `GetClaims` is the whole integration. Every generated handler identifies its
 caller with the same verification that issued the token, so a session token, an
@@ -205,8 +215,8 @@ and the tenant scoping the repositories enforce comes from the same claims.
 
 The defaults are the ones a project would have written anyway: `/auth` for the
 paths, the `X-Tenant-Id` header for the tenant, 10-minute access tokens, 12-hour
-sessions, 30 days for "remember me", a minimum password length of 12, and the
-documented rate limits. Every one of them is a key under `auth:` in rig.yaml —
+sessions, 30 days for "remember me", six-digit codes that die after three wrong
+guesses, and the documented rate limits. Every one of them is a key under `auth:` in rig.yaml —
 `rig schema project` lists them, and [docs/auth.md](../../docs/auth.md) says what
 each one costs. They live in the file rather than in a Go literal because the
 reference documentation and the client libraries are generated from it: a token
@@ -224,10 +234,10 @@ assembles `authpg`, `session`, `account`, `apikey`, `authhttp` and `throttle`,
 every one of them exported and separately usable. `front.Parts()` returns what it
 built, for the things an endpoint cannot do for you: issuing a session after
 somebody signs in another way, minting a key from an admin screen, resolving a
-caller's grants. The seed in this example uses it to set a password:
+caller's grants. This example reaches for it in its seed and its tests:
 
 ```go
-front.Parts().Accounts.SetPassword(ctx, identityID, password)
+front.Parts().Accounts.Invite(ctx, account.InviteInput{ /* … */ })
 ```
 
 Going halfway is a supported route rather than a rewrite: build the parts
@@ -290,13 +300,13 @@ neighbours stay out. The physical name keeps its prefix and the API does not: th
 scaffolded configuration asks for `resource: Account`, so what arrives is
 `Account` on `/api/v1/accounts`. It also keeps the table free of a `Create`,
 because an account created through plain CRUD would have no identity behind it
-and no invitation sent.
+and nobody would have been asked.
 
 `auth.own: true` goes further and generates for all of it, for a project that has
 forked the migrations and stopped importing `rig/auth`. It is a one-way door in
 practice: a generated repository does not enforce what the auth package enforces,
-so a password reaching `rig_identity_credential` through one is a password nobody
-hashed.
+so a row reaching `rig_identity_verification` through one is a credential nobody
+minted.
 
 ## One person, many tenants
 
@@ -305,12 +315,12 @@ where most schemas have one:
 
 | table | scope | holds |
 |---|---|---|
-| `rig_identity` | global | the address, the password, the linked providers. Who somebody *is*. |
+| `rig_identity` | global | the address, whether it is confirmed, the linked providers. Who somebody *is*. |
 | `rig_account` | one tenant | their role there, their display name there, whether they are still there. Who they are *here*. |
 
 Somebody who works at two of your customers is one identity and two accounts, and
-signs in to both with one password. They can be an `Owner` in one and `Basic` in
-the other, which the single-table version cannot express at all.
+one address reaches both. They can be an `Owner` in one and `Basic` in the other,
+which the single-table version cannot express at all.
 
 The reason it is split this way round — rather than making membership a join table
 and leaving `rig_account` global — is that `rig_account` keeps its `tenant_id`. Every
@@ -333,9 +343,11 @@ Three consequences worth knowing:
 
 - **The address is globally unique**, not unique per tenant. A second identity
   with the same address is refused by the database.
-- **A password change or reset ends every session in every tenant.** One
-  credential covers them all, so anything less would leave a thief signed in to
-  the tenant the person was not looking at.
+- **"Sign me out everywhere" reaches every tenant.** A person is global and
+  their sessions are not, so anything narrower would leave a thief signed in to
+  the tenant the person was not looking at. It is
+  `accounts.RevokeEverySession`, and the decision to use it is the
+  application's.
 - **A service account has no identity at all** — `identity_id` is null and a CHECK
   requires it, because nobody signs in as an integration. Its address resolves to
   nobody, so a login attempt gets the same 401 an unknown address does.
@@ -458,36 +470,47 @@ Under the hood the key travels in the claims — `tenancy.Claims.APIKeyID`, set
 when the credential was a key — so a hook, a service rule and the repository all
 see the same thing.
 
-## Creating an account
+## Adding somebody, and asking somebody
 
-`POST /auth/accounts`, and deliberately not `POST /api/v1/accounts` — the table
-has no Create at all, so there is one door and it is the one that does the extra
-work:
+Two verbs and deliberately not one, because they do different things and a flag
+on one function could never say which.
+
+`POST /auth/accounts` adds a member, now:
 
 ```bash
 curl -s localhost:8082/auth/accounts -H "Authorization: Bearer rig_sk_TMDR…" \
-  -d '{"emailAddress":"grace@example.com","displayName":"Grace","role":"Admin","invite":true}'
+  -d '{"emailAddress":"grace@example.com","displayName":"Grace","role":"Admin"}'
 # 201 {"id":"019fc7…","kind":"Person","role":"Admin", …}
 ```
 
 It finds the person by their address or creates them, then gives them an account
 here. An address that already belongs to somebody is **reused rather than
 refused** — a person who works at two of your customers is one person, and a
-second identity would mean a second password. It honours the tenant's allowed
-domains, refuses a second account *in the same tenant* with a **409**, creates
-**no credential**, records who asked, and — only if asked — sends the verification link that lets the person set
-a password and arrive. Provisioning four thousand employees should not send four
-thousand emails, so `invite` is a request rather than the default.
+second identity would mean a second of everything. It honours the tenant's
+allowed domains, refuses a second account *in the same tenant* with a **409**,
+and records who asked. It mails nothing: telling them is the application's, which
+is the argument for the other verb when the mail is the point.
 
-An **API key may call it**, which is what the audit columns were for: the new row
-names both the integration's service account and the key it came through, so
-"who added this person" has an answer months later. It needs the
+`POST /auth/invitations` asks somebody to join, and **creates nothing here**:
+
+```bash
+curl -s localhost:8082/auth/invitations -H "Authorization: Bearer rig_at_AGP4…" \
+  -d '{"emailAddress":"grace@example.com","displayName":"Grace","role":"Admin"}'
+# 201 {"id":"019fc7…","emailAddress":"grace@example.com","role":"Admin", …}
+```
+
+What it writes is an identity, if this installation has never seen the address,
+and a row that says which tenant, what role, what to call them and who asked.
+**Accepting is what creates the account** — so Grace is not in the people list,
+is not counted, and has nothing scoped to her until she follows the link. Because
+the account then comes into existence inside rig's own handler, the roles that
+used to be granted by whoever clicked Invite are granted in `OnJoined` instead.
+
+An **API key may call either**, which is what the audit columns were for: the new
+row names both the integration's service account and the key it came through, so
+"who added this person" has an answer months later. Both need the
 `account.provision` permission — a role grant for a human, a scope for a key, one
 vocabulary either way.
-
-What it does *not* do is give the account a way in. That is `SetPassword`, an
-invitation, or a provider sign-in — each with its own rules — and keeping them
-apart is why this is not a POST on a table.
 
 ## Allowed email domains
 
@@ -533,23 +556,23 @@ different thing to fix from a 401.
 ## Rate limits
 
 Counted over `rig_auth_log` with a sliding window rather than in memory, so two
-replicas cannot disagree and a restart does not clear somebody's lockout. Six
-wrong passwords for one address and the next attempt is a **429** with
-`Retry-After` — including for the *correct* password, because the lockout is
-about the address and not about whether this particular guess was right.
+replicas cannot disagree and a restart does not clear somebody's lockout. Five
+wrong codes for one address and the next attempt is a **429** with `Retry-After`
+— including for the *correct* code, because the lockout is about the address and
+not about whether this particular guess was right.
+
+Beside it, and not the same thing: a code dies after **three** wrong guesses.
+That is a ceiling on one secret rather than a limit on an address, and a rolling
+window cannot express it — a fresh code would arrive with the old one's failures
+still against it. The ceiling is deliberately well under the lockout, so that
+mistyping is "ask for another" rather than fifteen minutes out.
 
 ## What this example does not do
 
-- **Login still takes one tenant.** The interface offers a dropdown of every
-  tenant because one process serves them all; a real deployment reads the
-  tenant from the subdomain. What is built is the half that matters once you are
-  in: `GET /auth/tenants` lists where you belong and
-  `POST /auth/tenants/{id}/switch` reissues a pair for another one, with no
-  password. Returning the list *before* a session exists — so a sign-in page can
-  offer it — is the remaining piece.
-- **The outbox is not a mailbox.** `services/outbox` keeps the last twenty links
-  in memory so the invitation flow can be demonstrated without a mail server.
-  A live invitation is a credential for as long as it lives, so a real
+- **The outbox is not a mailbox.** `services/outbox` keeps the last twenty
+  secrets in memory so that signing in and being invited can both be
+  demonstrated without a mail server — the code on the page *is* the code in the
+  mail. A live code is a credential for the ten minutes it lasts, so a real
   `Notifier` sends it and keeps nothing.
 - **Half of the provider sign-in is a different example.** The button here names
   no tenant, which is one of the two shapes: the callback resolves who somebody
@@ -569,7 +592,7 @@ about the address and not about whether this particular guess was right.
 `auth_docker_test.go` drives the wiring this example ships — `newAPI` is a
 function taking a pool precisely so a test can build the same thing — over a real
 database: the session flow end to end, the 403 without a permission, one person
-in two tenants signing in to both with one password and seeing different notes,
+in two tenants signing in to both with one address and seeing different notes,
 and the lockout. It reaches the foundation's tables with plain SQL, because there
 is no generated repository for them — which is also what a project's own
 migrations and seeds will do.

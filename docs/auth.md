@@ -55,10 +55,12 @@ on the next request** — there is no signed document to wait out. There are no
 signing keys, no key rotation and no JWKS. The cost is that read; see
 [Tuning](#tuning) if it ever matters.
 
-> sha256 rather than argon2id, and the difference is deliberate. A password is
-> short and human-chosen and worth grinding for; a token secret is 256 bits from
-> the system's random source, and running a memory-hard function on every request
-> would be a denial of service aimed at ourselves.
+> sha256 rather than something memory-hard, and the difference is deliberate. A
+> token secret is 256 bits from the system's random source, so no amount of
+> guessing will find it, and running a memory-hard function on every request
+> would be a denial of service aimed at ourselves. The one secret here that *is*
+> guessable is a sign-in code, and what keeps that safe is an attempt ceiling
+> rather than a hashing cost — see [Signing in with a code](#signing-in-with-a-code).
 
 ### `rig_sk_` covers both kinds of key
 
@@ -94,13 +96,13 @@ matched case-insensitively; anything else is a 401 saying so.
 X-Tenant-Id: <uuid>
 ```
 
-Read **only** where a tenant cannot be known any other way: `POST /auth/login` and
-`POST /auth/password/reset`. Once there is a session the tenant comes from the
+Read **only** where a tenant cannot be known any other way: `POST /auth/email-code` and
+`POST /auth/email-code`. Once there is a session the tenant comes from the
 token, and this header is ignored.
 
 Absent is not an error — it means *unspecified*, and login treats that as "sign me
 in wherever I belong". That is what a single sign-in page needs: a visitor cannot
-say which tenants an address belongs to before the password has been checked. A
+say which tenants an address belongs to before the code has come back. A
 header that is present and malformed is still refused, because that is a caller
 getting it wrong rather than leaving it out.
 
@@ -138,12 +140,15 @@ the table below.
 
 ### Signing in and out
 
+There are two ways in and neither is a password. rig stores none, and there is
+no endpoint that would take one.
+
 | | credential | notes |
 |---|---|---|
-| `POST /auth/login` | none | Answers with a pair, an identity token, and your tenants |
+| `POST /auth/email-code` | none | Always 204. Only when `auth.email_code.enabled` |
+| `POST /auth/email-code/verify` | none | Answers with a pair, an identity token, and your tenants |
 | `POST /auth/logout` | `rig_at_` | Revokes the whole family |
 | `POST /auth/refresh` | `rig_rt_` in the body | The only endpoint that takes one |
-| `POST /auth/register` | none | Only when `AllowRegistration` |
 | `GET /auth/oauth/{provider}/start` | none | Only when providers are configured |
 | `GET /auth/oauth/{provider}/callback` | none | The provider sends the browser here |
 
@@ -174,25 +179,84 @@ All take `rig_at_`.
 | `GET /auth/audit` | — for your own events |
 | `GET /auth/audit?scope=all` | `authlog.read.all` |
 | `POST /auth/accounts` | `account.provision` |
+| `POST /auth/invitations` | `account.provision` |
 | `GET /auth/invitations`, `DELETE /auth/invitations/{id}` | `account.provision` |
 | `GET /auth/api-keys`, `DELETE /auth/api-keys/{id}` | `apikey.own` (yours) or `apikey.manage` (anybody's) |
 | `POST /auth/api-keys` | `apikey.own` for a personal key, `apikey.manage` for a service one |
 | `POST /auth/impersonate`, `DELETE /auth/impersonate` | `account.impersonate` |
 
-### Passwords and addresses
+### Addresses and invitations
 
 | | credential |
 |---|---|
-| `POST /auth/password/reset` | none |
-| `POST /auth/password/reset/confirm` | none — the emailed token is in the body |
-| `POST /auth/password/change` | `rig_at_` |
 | `POST /auth/email/verify` | none — the emailed token is in the body |
 | `POST /auth/email/verify/resend` | `rig_at_` |
+| `GET /auth/invitations/preview` | none — the token is in the query string |
 | `POST /auth/invitations/accept` | none — the emailed token is in the body |
+
+`GET /auth/invitations/preview` is the only unauthenticated `GET` rig serves, and
+it is worth knowing why. Somebody following an invitation is, more often than
+not, signed out and on a device this deployment has never seen — so a landing
+page holds a token and nothing that can interpret it. This answers what the token
+is *for*, without consuming it and without extending it, so the page can say
+"Anna invited you to Skolan i Solna" instead of showing a bare sign-in box.
+
+One 404 for every way the token can be wrong — unknown, used, withdrawn, expired,
+the wrong kind — so it cannot be used to probe the table, and it is rate-limited
+by source address.
 
 ---
 
 ## Flows
+
+### Signing in with a code
+
+The way in for anybody with no account at a configured provider, which in most
+deployments is most people. Two calls, and a mailbox between them.
+
+```
+1  POST /auth/email-code          {emailAddress}
+   → 204                                                 ← always, whatever you type
+
+2  POST /auth/email-code/verify   {emailAddress, code}
+   → 200  accessToken, refreshToken, identityToken, tenants: [ … ]
+```
+
+**The first answers 204 for an address nobody has, and for one somebody does.**
+Any difference in status, body or timing would make it a list of who has an
+account here, which is what the endpoint would then be used for. The second is
+padded for the same reason: with no password to verify there is no expensive
+operation making the two paths cost the same, so a floor over both is the whole
+of what keeps them indistinguishable.
+
+**A code dies of being guessed at, not just of being slow.** Six digits is a
+million values, and a rate limit counts failures over a rolling window — it
+cannot kill one secret. `auth.email_code.max_attempts` can: three wrong guesses
+and the code is revoked, and the way out is to ask for another. That default is
+deliberately well under the five wrong sign-ins that lock an address, so that
+mistyping a code is recoverable rather than a fifteen-minute lockout.
+
+**One live code per person.** Asking again revokes the last one, so "the newest
+code is the one that works" is true rather than probable, and the table cannot be
+filled by asking repeatedly.
+
+**Typing the code back confirms the address**, because the code went there and
+came back. That is the same evidence an invitation link is, and it is why
+`auth.require_verified_email` does not deadlock a code-only deployment: the
+first sign-in satisfies it.
+
+`auth.email_code.allow_provisioning` is the other decision. Off — the default —
+a code only reaches an address that already has an identity, which makes the
+deployment invite-only. On, an address rig has never seen gets a person created
+when the code is asked for, and `OnRegistered` runs in that transaction. It is
+the analogue of `auth.oauth.allow_provisioning`, and both doors are shut by
+default for the same reason.
+
+> **There is no registration endpoint, and that is not an omission.** With no
+> password there is nothing for one to take: "create an identity for this
+> address" is what asking for a code already does, and an endpoint that minted
+> an identity token for anybody who typed an address would be a door rather than
+> a form.
 
 ### A stranger arrives
 
@@ -200,8 +264,9 @@ The four steps, and the second one is the part that does not exist in most
 frameworks.
 
 ```
-1  POST /auth/register            {emailAddress, displayName, password}
-   → 201  identityToken, tenants: []                     ← no session yet
+1  POST /auth/email-code          {emailAddress}
+   POST /auth/email-code/verify   {emailAddress, code}
+   → 200  identityToken, tenants: []                     ← no session yet
 
 2  GET  /auth/me/invitations      Bearer rig_it_…
    GET  /auth/me/tenants          Bearer rig_it_…
@@ -215,52 +280,94 @@ frameworks.
 ```
 
 Step 1 creates a person and **nothing else** — no tenant, no session. That state
-has to exist, because somebody with an invitation waiting has an account and
+has to exist, because somebody with an invitation waiting has an identity and
 belongs nowhere, and accepting an invitation requires being signed in.
 
 An application that wants every newcomer to land somewhere answers step 2
 itself: `OnRegistered` (under [What you decide](#what-you-decide)) runs inside
-the registration transaction, and its ordinary body is `accounts.Provision`
-into a starter tenant — usually with `Invite` set, which adds the verification
-link. The transaction is the point: a hook error rolls the whole sign-up back,
-so there is never an account that half-joined.
+the transaction that creates the person, and its ordinary body is one of two
+calls. The transaction is the point: a hook error rolls the whole thing back, so
+there is never an identity that half-arrived.
 
-**The answer follows what the hook did rather than assuming it.** A hook that
-provisions puts somebody in a real tenant, and then step 1 answers the way a
-login does — the tenant list, the one they landed in marked `current`, and a
-session for it:
+**`Provision` adds a member; `Invite` asks somebody to join.** That is the whole
+difference and the two now answer differently, which is what a flag on one
+function could never express.
+
+`accounts.Provision` writes the account immediately. The newcomer is in the
+tenant's people list from that call whether or not they ever come back, and step
+1 then answers the way a sign-in does — the tenant list, the one they landed in
+marked `current`, and a session for it:
 
 ```
-1  POST /auth/register            {emailAddress, displayName, password}
-   → 201  accessToken, refreshToken, identityToken,
+   POST /auth/email-code/verify   {emailAddress, code}
+   → 200  accessToken, refreshToken, identityToken,
           tenants: [{…, current: true}]                  ← the hook put them there
 ```
 
-Anything else would tell a newcomer they belong nowhere and make them sign in
-again to find the tenant they had just been put in.
+`accounts.Invite` writes no account at all — an identity if the address is new,
+and a row that says which tenant, what role, what to call them and who asked.
+**Accepting is what creates the account**, so somebody who was invited and has
+not replied is not in the people list, is not counted as a member, and has
+nothing scoped to them. Step 1 then answers with an identity token and an empty
+list, and the invitation is waiting in step 2.
 
-**`Invite` does not change that, and the name is the trap.** `Provision` creates
-a live account whether or not it is set; what `Invite` adds is the verification
-link, so somebody brought in by an administrator can confirm the address and set
-a password. It is not a pending membership and there is no row that says
-"invited". So a hook that provisions *with* `Invite` answers exactly as one
-without it does — the difference is a mail, and `GET /auth/me/invitations` lists
-the link rather than a door they are waiting outside.
+The trade is that there is one more step between deciding somebody should be
+here and their being here, and that the step is theirs rather than yours. What
+it buys is that "invited" and "a member" are different states in the database
+rather than the same state with a mail attached.
 
-If what you want is a newcomer who belongs nowhere until they act, do not
-provision them in the hook at all: leave `OnRegistered` nil, and let them accept
-an invitation somebody else left or create a tenant of their own. That is the
-sequence at the top of this section, and it is what happens with no hook.
+Because the account comes into existence inside rig's own accept handler, there
+is no application code in that request — which is what `OnJoined` is for. It runs
+in the same transaction, after the account exists and before the session is
+issued, and it is where a new member's roles and rows are seeded. Under
+`Provision` that work was simply the caller's next line.
 
 Accepting sends the invitation's **identifier**, not the token that was emailed.
 Being signed in as the person invited is the *stronger* claim of the two: a token
 proves somebody reached the address, a session proves who they are. That is why a
-listing can hand out identifiers and never tokens.
+listing can hand out identifiers and never tokens — and why the preview below
+hands one out too.
+
+### An invitation arrives
+
+The mail carries a link, and whoever clicks it is usually signed out on a device
+this deployment has never seen. Both branches start the same way.
+
+```
+GET /auth/invitations/preview?token=…
+→ 200 {"tenantName": "Skolan i Solna", "emailAddress": "b***@school.example",
+       "invitedBy": "Anna Svensson", "role": "Admin", "expiresAt": "…", "id": "…"}
+```
+
+**Signed out**, the page can now say who invited them and where, offer the ways
+in this deployment has — a provider, or a code — and accept afterwards. Without
+it the page has a token it cannot interpret and can only show a bare sign-in box,
+which throws the mail away and is the page most likely to be mistaken for
+phishing.
+
+**Signed in**, the `id` in that answer goes straight to
+`POST /auth/me/invitations/accept`. That is the answer to the fourth case —
+somebody holding the link *and* a session: prefer the stronger of the two claims.
+`AcceptAsMe` refuses an invitation that is not the caller's own, which the token
+door cannot, because there the token is the whole of the claim.
+
+What it reveals is chosen rather than convenient. The tenant name is the point.
+The address is **masked**, because mail gets forwarded and holding a link does
+not prove you are its addressee — the unmasked form would turn a leaked link into
+a confirmed address. `invitedBy` is a display name, and it is what makes the page
+trustworthy rather than phishing-shaped: it is a name the recipient was about to
+read in the mail anyway.
+
+One consequence to know rather than to fix: Anna, signed in as herself, opening
+Bo's forwarded link and taking the *token* door gets a session for Bo's account.
+The token is the credential, and holding it means having reached Bo's mailbox.
+The masked address is what lets a page notice the mismatch and offer to sign out
+first.
 
 ### Somebody who already has an account
 
 ```
-POST /auth/login   {emailAddress, password}          no X-Tenant-Id
+POST /auth/email-code/verify   {emailAddress, code}      no X-Tenant-Id
 → 200 {
     accessToken, refreshToken, sessionId, expiresAt,
     identityToken,                    ← always, even alongside a session
@@ -298,9 +405,9 @@ session is for carries `current: true`. So the ordering and the landing have
 nothing to disagree about.
 
 **Every one of these answers is the same for a provider sign-in.** Not by
-coincidence — `POST /auth/login` and an OAuth callback go through one method to
-answer them, which is the only way two paths stay agreed about where somebody
-goes. See [Signing in with a provider](#signing-in-with-a-provider).
+coincidence — the code flow and an OAuth callback go through one method to answer
+them, which is the only way two paths stay agreed about where somebody goes. See
+[Signing in with a provider](#signing-in-with-a-provider).
 
 ### Staying signed in
 
@@ -371,7 +478,7 @@ else: `/api/auth` puts them at `/api/auth/oauth/{provider}/start`.
 
 `remember=1` is the "stay signed in" box a provider sign-in has nowhere to draw:
 `/start` is a link, the callback is a redirect, and there is no form in between.
-It buys what it buys a password login — `session.remember_ttl` instead of
+It buys what it buys a code sign-in — `session.remember_ttl` instead of
 `session.refresh_ttl` — and needs no allow-list, because both of those are
 lengths you configured. Absent, empty, or unreadable all mean no; unlike
 `returnTo`, a value that cannot be read is not refused, because a `text/plain`
@@ -420,7 +527,7 @@ here:
 
 1. `FindLink(provider, subject)` — the **subject**, always.
 2. Failing that, `FindIdentityByEmail` — so "sign in with Google" reaches the person
-   who already signed up with a password, rather than making a second one beside
+   who already exists here, rather than making a second one beside
    them.
 3. Failing that, `ProvisionIdentity` — but only under `AllowProvisioning`.
 
@@ -432,12 +539,12 @@ tenant's allowed email domains.
 The two questions refuse differently, and the difference matters to whoever
 reads it: `no_account` is "we have never heard of you", `no_tenant_access` is
 "we know you, you are not in this one" — which is the same sentence
-`POST /auth/login` answers with, and the only one of the two a person can act
+`POST /auth/email-code/verify` answers with, and the only one of the two a person can act
 on.
 
 When nothing named one, the callback has nothing to answer it with and does not
 try: it hands on a sign-in with the first question answered and `tenantID` nil,
-and where that person goes is settled the way `POST /auth/login` settles it —
+and where that person goes is settled the way a code sign-in settles it —
 from their own memberships. See [When nobody knows the tenant
 yet](#when-nobody-knows-the-tenant-yet).
 
@@ -456,7 +563,7 @@ primary address's flag.
 
 Because it is evidence, it is **recorded**: linking a verified provider address
 marks the identity's address verified, the same way provisioning through a
-provider does. So somebody who signed up with a password, never opened the
+provider does. So somebody who signed in with a code once, never opened the
 confirmation mail, and later signed in with Google is verified from then on —
 and `require_verified_email` applies to a provider sign-in exactly as it applies
 to a login. An address the provider has *not* verified is not recorded as
@@ -526,7 +633,7 @@ gets this without configuring anything.
 
 What the callback then hands `OnSignIn` is a sign-in with the identity resolved
 and `TenantID` nil. The default answers it from the person's own memberships,
-which is [the same three answers a password login
+which is [the same three answers a code sign-in
 gives](#somebody-who-already-has-an-account): the tenant they were last in, or
 their oldest, or a 200 with an identity token and an empty `tenants` and the
 picker taking over.
@@ -578,7 +685,7 @@ an `OnSignIn` — it decides nothing — but through `auth.New` you get one of t
 unless you write your own.
 
 **Without a `web:` block** it is `authhttp.Handler.SignIn`, which answers with
-the same **body** a password login does: the token pair, the identity token and
+the same **body** a code sign-in does: the token pair, the identity token and
 the tenant list. Right for curl, for a native client, and for a front end served
 from this same origin.
 
@@ -874,7 +981,7 @@ Decided in one place, which is what stops them drifting per endpoint.
 
 | | meaning |
 |---|---|
-| **401** | Identity could not be established — missing, malformed, expired, revoked or replayed token; unknown key; wrong password. *Never* a permission failure. |
+| **401** | Identity could not be established — missing, malformed, expired, revoked or replayed token; unknown key; wrong sign-in code. *Never* a permission failure. |
 | **403** | Identity is known and not permitted — missing permission, disabled account, a widening you do not hold. |
 | **404** | The row belongs to another tenant, or to another person on an owner-scoped table. Not 403: a distinct "you may not see this" turns every identifier into an existence oracle. |
 | **429** | Any throttle or lockout, always with `Retry-After` and `RateLimit-*`. |
@@ -896,32 +1003,49 @@ correct across replicas, and self-healing — counters age out.
 
 | limit | `auth.limits` key | keyed on | default | cleared by a success |
 |---|---|---|---|---|
-| Failed login | `login_by_email` | `lower(email_address)` | 5 / 15 min → lockout | yes |
-| Failed login | `login_by_ip` | IP address | 50 / 15 min | **no** |
-| Password reset request | `password_reset` | `lower(email_address)` | 5 / hour | no |
+| Failed sign-in | `login_by_email` | `lower(email_address)` | 5 / 15 min → lockout | yes |
+| Failed sign-in | `login_by_ip` | IP address | 50 / 15 min | **no** |
+| Code requested | `email_code_request` | `lower(email_address)` | 5 / hour | no |
+| Code requested | `email_code_ip` | IP address | 100 / hour | no |
 | Verification resend | `verification_resend` | account | 5 / hour | no |
 | Refresh | `refresh` | session root | 60 / min | no |
 | API key auth failures | `api_key_failures` | `key_id` | 20 / min | yes |
+| Invitation previewed | `invitation_preview` | IP address | 60 / hour | no |
+
+**`auth.email_code.max_attempts` is not in this table, and that is the point.**
+It is a ceiling on one code rather than a limit on an address: a limit counts
+failures over a rolling window, so a fresh code would arrive with the old code's
+failures still against it, and five mistypes would lock the address rather than
+killing one code. The two are not substitutes and neither replaces the other.
+
+With the standard numbers the *request* limit is what somebody actually hits
+first: reaching five failed sign-ins takes five codes, because a code dies after
+three guesses, and the sixth request is refused before the sixth sign-in can be
+tried. So `login_by_email` is defence in depth on this door rather than the thing
+doing the work — worth knowing before tuning either.
 
 The configuration sets `max` and `window`. Which event a limit counts, and what
 clears it, stays rig's: a limit counting something else under the same name would
 not be the same limit.
 
-Two keys for login, deliberately: an email-only limit lets one attacker lock a
-victim out, and an IP-only limit lets a botnet spray. The IP limit is *not* cleared
-by a success — one valid login from a shared address would otherwise wipe the
-record of a thousand failures from the same place, which is the thing it exists to
-notice.
+Two keys for a sign-in, deliberately: an email-only limit lets one attacker lock
+a victim out, and an IP-only limit lets a botnet spray. The IP limit is *not*
+cleared by a success — one valid sign-in from a shared address would otherwise
+wipe the record of a thousand failures from the same place, which is the thing it
+exists to notice. `email_code_ip` is loose for the same reason `login_by_ip` is:
+a shared office is one address, and it is a ceiling on how fast one source can
+make identities rather than a per-person limit.
 
-The lockout check runs **before** password verification, so a locked request
-neither burns an argon2 hash nor extends its own window. Login is padded to a
+The lockout check runs **before** the code is compared, so a locked request
+neither does the work nor extends its own window. A sign-in is padded to a
 configurable floor (750ms) so response time does not reveal whether an account
-exists.
+exists — and with no password to verify, that floor is the whole of what keeps
+the two paths indistinguishable rather than a belt over braces.
 
 **A provider sign-in counts as a success for `login_by_email`**, so signing in
-with Google lifts a lockout somebody earned mistyping their password. That is
+with Google lifts a lockout somebody earned mistyping their code. That is
 safe rather than a hole: clearing it takes control of the provider account, which
-is not something somebody guessing a password has. It has no lockout of its own —
+is not something somebody guessing a code has. It has no lockout of its own —
 there is no credential being guessed, and the round trip to the provider is the
 bound.
 
@@ -944,7 +1068,7 @@ cache:
 with only a timer on it is a revoked session that keeps working, which is why rig
 never shipped one. What this switches on is a Postgres `NOTIFY` channel: every
 revocation the foundation performs — a logout, an administrative revoke, a
-password change ending every session, reuse detection killing a family, an API
+an address being confirmed, reuse detection killing a family, an API
 key revoked or rotated — publishes **inside the transaction that performed it**.
 Postgres delivers a notification when its transaction commits and throws it away
 if that transaction rolls back, so the invalidation is atomic with the change,
@@ -1182,19 +1306,24 @@ auth:
     rotation_leeway: 30s
     identity_ttl: 30m
 
-  password:
-    min_length: 12
-    max_length: 1024
-    breach_check: false     # Have I Been Pwned, hash prefix only, fails open
+  # The way in for anybody with no account at a configured provider. Off by
+  # default; on, it mounts two routes and off means they do not exist.
+  email_code:
+    enabled: true
+    length: 6            # 6 to 10. Fewer is guessable whatever the ceiling
+    ttl: 10m
+    max_attempts: 3      # a ceiling on one code, not a limit on the address
+    # Whether a code may go to an address rig has never seen, creating the
+    # person. Off is invite-only; on is self-registration, and OnRegistered is
+    # what decides where a newcomer lands.
+    allow_provisioning: false
 
-  # Whether the routes exist at all. Off means no route, rather than a 403 to
+  # Whether the route exists at all. Off means no route, rather than a 403 to
   # something probeable.
-  allow_registration: false
   allow_tenant_creation: false
-  # Refuses a sign-in — a password or a provider, the same rule for both — until
-  # the address has been confirmed. Registration itself is never refused by it:
-  # the address is one request old at that point. See Signing in with a provider
-  # for what counts as confirming one.
+  # Refuses a provider sign-in until the address has been confirmed. The code
+  # flow is never refused by it, because typing the code back *is* confirming
+  # the address. See Signing in with a provider for what else counts.
   require_verified_email: false
 
   # Only the numbers. Which event each limit counts is rig's — see Rate limits.
@@ -1351,23 +1480,30 @@ front, err := api.New(pool, api.Hooks{
         OnCreated: func(ctx, made account.NewTenant) error { … },  // what else it needs
     },
 
-    // What happens to a stranger who just signed themselves up, inside the
-    // transaction that created them — an error rolls the sign-up back. The
-    // ordinary body is Provision into a starter tenant. Present only when
-    // allow_registration is set; nil registers the person and nothing else,
-    // which is what leaves them in the picker.
+    // What happens to somebody rig has never seen — asking for a code with a
+    // new address, where email_code.allow_provisioning allows it — inside the
+    // transaction that created them. An error rolls the whole thing back. Nil
+    // creates the person and nothing else, which leaves them in the picker
+    // with nothing in it.
     //
-    // Provision creates a live account, so the registration answers with that
-    // tenant and a session for it. Invite adds the verification link; it is not
-    // a pending membership.
+    // The two bodies answer differently, which is the whole reason there are
+    // two verbs. Invite leaves them outside with a door to knock on; Provision
+    // puts them in the tenant and the sign-in answers with a session for it.
     OnRegistered: func(ctx context.Context, accounts *account.Service, in account.Registered) error {
-        _, err := accounts.Provision(ctx, account.ProvisionInput{
+        _, err := accounts.Invite(ctx, account.InviteInput{
             TenantID:     starterTenant,
             EmailAddress: in.EmailAddress,
             DisplayName:  in.DisplayName,
-            Invite:       true,
         })
         return err
+    },
+
+    // What a new member needs beyond their account row, in the transaction
+    // that created it. Accepting an invitation is called by rig's own handler,
+    // so this is the only application code in that request — under Provision
+    // the same work was simply your next line.
+    OnJoined: func(ctx context.Context, in account.Joined) error {
+        return grantRolesFor(ctx, in.TenantID, in.AccountID, in.Role)
     },
 
     // How a provider sign-in ends and how it fails, plus the values rig.yaml
@@ -1440,7 +1576,7 @@ field, and call `auth.New` yourself rather than abandoning the generated wiring.
 
 ## Mail that survives a provider outage
 
-Every link rig mints — a password reset, an address confirmation, an invitation —
+Every secret rig mints — a sign-in code, an address confirmation, an invitation —
 goes out through your `Notifier`. By default that call happens **inside the
 request that asked for it**, which is the simplest thing and has one bad
 afternoon in it: when your provider is down, the request fails, the caller's
@@ -1523,7 +1659,11 @@ you get by writing none of them.
 | `session.identity_ttl` | 30m | How long somebody has to pick a tenant |
 | `session.rotation_leeway` | 30s | Longer forgives more retries and widens the replay window |
 | `oauth.state_ttl` | 10m | How long a sign-in round trip may take. Generous for a redirect, short enough that a stolen state is useless. |
-| `password.min_length` | 12 | Length is what helps; composition rules push people toward `Password1!` |
+| `email_code.length` | 6 | More digits buy more attempts; fewer than six is guessable whatever the ceiling |
+| `email_code.ttl` | 10m | Longer is a live credential sitting in a mailbox; shorter is somebody who went to make tea |
+| `email_code.max_attempts` | 3 | Higher is friendlier and closer to the address lockout beside it, which is the one that costs fifteen minutes |
+| `email_code.allow_provisioning` | off | On, a stranger typing an address creates a person and runs `OnRegistered` before proving anything |
+| `limits.invitation_preview` | 60 / hour | Lower and a shared office stops being able to read invitation links |
 
 Durations are Go's syntax with `d` for days: `250ms`, `45s`, `15m`, `12h`, `30d`.
 
