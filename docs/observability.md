@@ -166,6 +166,10 @@ At `DEBUG`, one line per request, after the handler has finished:
 `GET /api/v1/todos/{id}` rather than one distinct value per identifier anybody
 has ever fetched. That is what makes it usable as a label.
 
+`status` is what was written, which for an abandoned request is nothing — so it
+reads `200`. The line above it, `request abandoned`, is the one that says what
+actually happened; this one only ever reports the answer, and there was none.
+
 It is debug because it is one line per request forever. Turn it on when you are
 looking at something:
 
