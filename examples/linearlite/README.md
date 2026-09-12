@@ -56,11 +56,16 @@ without it the routes that stop and start that container are not registered. See
 [Take the sync service down](#take-the-sync-service-down).
 
 Open [localhost:8084](http://localhost:8084) and sign in as
-`demo@linearlite.dev` / `correct horse battery staple` — or register a fresh
-account and watch requirement two happen: you arrive already inside the demo
-workspace, put there by the `OnRegistered` hook in `api/internal/app` inside the
-very transaction that created you, and the registration itself answers with the
-session for it.
+`demo@linearlite.dev`. There is no password: type the address, and the code rig
+would have mailed appears on the form, because this demonstration has no mail
+server.
+
+Or type an address nothing here has ever seen, and watch requirement two happen.
+`allow_provisioning` creates the person when the code is asked for, and the
+`OnRegistered` hook in `api/internal/app` invites them to the demo workspace
+inside the very transaction that created them — so typing the code back lands
+you in the picker with that invitation already waiting, one click from the
+board.
 
 For the full effect, open a second browser (or a private window) as
 `alex@linearlite.dev` and put the two side by side: each window's header shows

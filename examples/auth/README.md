@@ -78,10 +78,15 @@ give.
 integration with a service account and a key of its own:
 
 ```
-seeded tenant 00000000-0000-0000-0000-000000000001 with ada@example.com /
-"correct horse battery staple" — Owner, holding note.write
+seeded tenant 00000000-0000-0000-0000-000000000001 (addresses in example.com)
+with ada@example.com — Owner, holding note.write
+ask for a code at /auth/email-code and read it off the page: this example's
+notifier prints what it would have mailed.
 integration key for nightly-import@example.com: rig_sk_ZB4ZBXDD…_HVR6TXAM…
 ```
+
+Nothing is set up for Ada to sign in *with*, because there is nothing to set up:
+she asks for a code at the address above and types it back.
 
 The key is printed once, because only its hash is stored.
 
