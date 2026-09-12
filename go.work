@@ -17,5 +17,6 @@ use (
 	./presence
 	./rigclient
 	./rigs3
+	./rigtest
 	./runtime
 )
