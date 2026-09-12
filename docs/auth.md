@@ -1684,11 +1684,12 @@ rotation leeway a consumed token never leaves — rather than adjusting it quiet
 - `examples/auth_oauth` — the same sign-in with the other answer: a tenant per
   subdomain, so the host names the tenant before the redirect. Between them the
   two cover both, which is the only choice a deployment actually has.
-- `examples/idp` — the stand-in provider both of them serve, which is why either
-  works with no credentials at all. Not a mock: single-use authorization codes,
-  PKCE verified at the token endpoint, and a consent screen that lets you choose
-  whether it says the address is verified, so both branches of that check are
-  reachable from a browser. Setting `GOOGLE_CLIENT_ID` and
-  `GOOGLE_CLIENT_SECRET` replaces it with nothing else changing.
+- `rig/auth/oauthtest` — the stand-in provider both of them serve, which is why
+  either works with no credentials at all, and the one to reach for in your own
+  tests. Not a mock: single-use authorization codes, PKCE verified at the token
+  endpoint, and a consent screen that lets you choose whether it says the address
+  is verified, so both branches of that check are reachable from a browser.
+  Setting `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` replaces it with nothing
+  else changing.
 - `examples/auth/services/authz` — a worked authorization model, if a starting
   point beats a blank page.

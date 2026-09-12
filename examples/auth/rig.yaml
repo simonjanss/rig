@@ -79,7 +79,7 @@ auth:
   # draws it.
   #
   # No credentials are configured, so ConfiguredProviders finds none and main.go
-  # supplies the stand-in from examples/idp through OAuthHooks.Extra. Set
+  # supplies the stand-in from rig/auth/oauthtest through OAuthHooks.Extra. Set
   # GOOGLE_CLIENT_ID and GOOGLE_CLIENT_SECRET and the real button appears beside
   # it. `google` is listed so the block validates and the routes mount.
   oauth:

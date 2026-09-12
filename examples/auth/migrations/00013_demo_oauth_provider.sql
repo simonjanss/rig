@@ -2,7 +2,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- The stand-in provider this example serves itself, from examples/idp.
+-- The stand-in provider this example serves itself, from rig/auth/oauthtest.
 --
 -- oauth.Provider.Name has to be a label of this enum, because it is what gets
 -- stored in rig_identity_oauth.provider — so adding a provider is a migration,

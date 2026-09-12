@@ -7,7 +7,6 @@ use (
 	./examples/auth
 	./examples/auth_oauth
 	./examples/fantasyfootball
-	./examples/idp
 	./examples/linearlite/api
 	./examples/sdk
 	./examples/todo

@@ -6,7 +6,6 @@ require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
 	github.com/simonjanss/rig/auth v0.0.0
-	github.com/simonjanss/rig/examples/idp v0.0.0
 	github.com/simonjanss/rig/migrate v0.0.0
 	github.com/simonjanss/rig/rigclient v0.0.0
 	github.com/simonjanss/rig/runtime v0.5.1
@@ -29,8 +28,6 @@ require (
 )
 
 replace github.com/simonjanss/rig/auth => ../../auth
-
-replace github.com/simonjanss/rig/examples/idp => ../idp
 
 replace github.com/simonjanss/rig/migrate => ../../migrate
 

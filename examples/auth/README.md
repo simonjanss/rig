@@ -104,7 +104,7 @@ go comes from their own memberships — the same three answers a code sign-in
 gives: the tenant they were last in, their oldest, or nowhere yet and here is
 the picker.
 
-The provider is a stand-in from [`examples/idp`](../idp), served by this
+The provider is a stand-in from `rig/auth/oauthtest`, served by this
 application, so the button works with nothing registered anywhere. Its consent
 screen lets you choose what it claims about you, which is how both branches of
 the linking rule are reachable: sign in with the address you registered with and

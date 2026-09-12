@@ -144,7 +144,7 @@ func (s *Server) Mount(mux oauth.Router) {
 	mux.HandleFunc("POST "+BasePath+"/approve", s.approve)
 	mux.HandleFunc("POST "+BasePath+"/{provider}/token", s.token)
 	mux.HandleFunc("GET "+BasePath+"/{provider}/userinfo", s.userinfo)
-	mux.HandleFunc("GET /user/emails", s.emails)
+	mux.HandleFunc("GET "+BasePath+"/{provider}/emails", s.emails)
 }
 
 // Wear returns one of rig's own providers with its three URLs pointed here.
@@ -383,10 +383,12 @@ func (s *Server) userinfo(w http.ResponseWriter, r *http.Request) {
 
 // emails is the second call GitHub's Extra makes.
 //
-// It is served at the real path rather than under [BasePath] because that URL is
-// the one thing about a provider that is not data: [oauth.GitHub] hardcodes
-// api.github.com, so the only way to reach a stand-in is to point the HTTP client
-// somewhere else. [Server.Transport] is what does that.
+// It sits under [BasePath] like everything else here, even though the URL it
+// stands in for does not: that one is the single thing about a provider which is
+// not data — [oauth.GitHub] hardcodes api.github.com — so reaching it at all
+// means pointing the HTTP client somewhere else, and something that is already
+// rewriting the host may as well rewrite the path. [Server.Transport] is what
+// does both, and it is why this server needs no route outside its own prefix.
 func (s *Server) emails(w http.ResponseWriter, r *http.Request) {
 	p, ok := s.bearer(r)
 	if !ok {

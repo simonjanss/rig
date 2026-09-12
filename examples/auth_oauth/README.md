@@ -71,9 +71,10 @@ the two halves are what those two answers look like.
 This one stays the check that a named tenant still behaves: every sign-in below
 names one, so nothing here can quietly start deferring.
 
-Both use the same stand-in provider, `examples/idp`, which is a module rather
-than a package inside either — one OAuth server, so two demonstrations cannot
-drift into exercising different flows.
+Both use the same stand-in provider, `rig/auth/oauthtest`, which is rig's own
+rather than a copy in either example — one OAuth server, so two demonstrations
+cannot drift into exercising different flows, and the same one rig's suites run
+on.
 
 ## What to try
 
@@ -119,7 +120,7 @@ none of it is in this directory.
 
 The one thing the provider's side constrains: a redirect URI is registered
 exactly, and few providers accept a wildcard. Every origin `Origin` can return has
-to be registered — which `examples/idp` enforces too, because a stand-in that
+to be registered — which `oauthtest` enforces too, because a stand-in that
 skipped it would be teaching the wrong lesson. A deployment with more subdomains
 than a console can hold keeps the callback on one canonical host instead, and has
 `OnSignIn` — the one hook this example keeps in Go — hand the finished session on
@@ -218,8 +219,8 @@ only way to see the refusal.
 
 ## What is a prop
 
-`examples/idp` is a provider this example serves itself, so the flow works without
-registering an application with anybody. It is not a mock: it hands back a
+`rig/auth/oauthtest` is a provider this example serves itself, so the flow works
+without registering an application with anybody. It is not a mock: it hands back a
 single-use authorization code and verifies the PKCE challenge before exchanging
 it, so the path exercised is rig's real one. Nothing in `auth/oauth` knows it is
 not Google.

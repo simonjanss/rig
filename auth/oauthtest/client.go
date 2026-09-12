@@ -7,11 +7,13 @@ import (
 	"net/http"
 	"net/url"
 	"slices"
+	"strings"
 	"sync"
 	"testing"
 
 	"golang.org/x/oauth2"
 
+	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/runtime/authwire"
 )
 
@@ -30,18 +32,32 @@ func (s *Server) Transport() http.RoundTripper {
 	if err != nil {
 		panic("oauthtest: " + err.Error())
 	}
-	return &rewrite{to: here}
+	return &rewrite{to: here, prefix: strings.TrimRight(here.Path, "/") + BasePath}
 }
 
-type rewrite struct{ to *url.URL }
+type rewrite struct {
+	to     *url.URL
+	prefix string
+}
+
+// githubEmails is the path [oauth.GitHub]'s Extra asks for. It is named here
+// because this is the only place that has to know it: everywhere else, where a
+// provider's endpoints live is data on the Provider.
+const githubEmails = "/user/emails"
 
 func (t *rewrite) RoundTrip(r *http.Request) (*http.Response, error) {
 	if r.URL.Host == t.to.Host {
 		return http.DefaultTransport.RoundTrip(r)
 	}
+
 	clone := r.Clone(r.Context())
 	clone.URL.Scheme, clone.URL.Host = t.to.Scheme, t.to.Host
+	// Cleared so the rewritten URL decides the Host header rather than the
+	// provider whose name is still on the original request.
 	clone.Host = ""
+	if clone.URL.Path == githubEmails {
+		clone.URL.Path = t.prefix + "/" + oauth.ProviderGitHub + "/emails"
+	}
 	return http.DefaultTransport.RoundTrip(clone)
 }
 
