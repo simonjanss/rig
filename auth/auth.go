@@ -54,6 +54,7 @@ import (
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/authpg"
 	"github.com/simonjanss/rig/auth/handoff"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/cache"
@@ -233,6 +234,42 @@ type Config struct {
 	// Tenants is what this application decides about making them. Every field is
 	// optional; the zero value lets anybody signed in make one called anything.
 	Tenants account.TenantOptions
+
+	// AllowIdentity decides whether somebody nobody here has ever heard of may
+	// become an identity, and it is the one gate on that question: every path
+	// that would write a rig_identity asks it. A provider sign-in, a mailed
+	// code, an invitation and a direct provision alike — so a deployment cannot
+	// acquire an ungated door by turning on a sign-in method it did not have
+	// before.
+	//
+	// Nil keeps today's behaviour exactly: OAuth.AllowProvisioning for the
+	// provider path, EmailCode.AllowProvisioning for the code one, and the
+	// account.provision permission for the other two. A gate is asked *as well
+	// as* those and never instead of them, so it cannot open a door a bool has
+	// shut.
+	//
+	// It is asked about strangers and nobody else. By the time it runs rig has
+	// established that the address has no provider link and no identity of its
+	// own, so an existing member — and somebody adding a second provider to an
+	// account they already have — have both been admitted without consulting it.
+	// An application writes one rule, not a chain of them.
+	//
+	// The ordinary body is a domain rule, and
+	// [github.com/simonjanss/rig/auth/identity.AllowDomains] is that written
+	// out — which auth.allowed_identity_domains in rig.yaml generates for you.
+	// It allows an invitation whatever the list says, because somebody here
+	// typed that address in.
+	//
+	// Returning an error refuses, and the error's own sentence is what the
+	// refusal says — except on the mailed-code path, which answers 204 to every
+	// address so that holding one cannot be used to ask whether somebody here
+	// has it. There the refusal goes to rig_auth_log instead.
+	//
+	// See [github.com/simonjanss/rig/auth/identity.Gate], including the one
+	// thing it is not: an identity that already exists at a domain a gate would
+	// now refuse goes on signing in, because nobody is asking about them any
+	// more. This gates becoming somebody, not being somebody.
+	AllowIdentity identity.Gate
 
 	// OnRegistered runs inside the transaction that creates somebody rig has
 	// never seen — asking for a sign-in code with a new address, where
@@ -611,6 +648,7 @@ func New(cfg Config) (*Auth, error) {
 		Sessions:             sessions,
 		Identities:           identities,
 		Tenants:              cfg.Tenants,
+		AllowIdentity:        cfg.AllowIdentity,
 		OnRegistered:         cfg.OnRegistered,
 		OnJoined:             cfg.OnJoined,
 		EmailCode:            cfg.EmailCode.options(),
@@ -777,6 +815,7 @@ func New(cfg Config) (*Auth, error) {
 			Tenant:            tenant,
 			AllowedReturnTo:   allowedReturnTo,
 			AllowProvisioning: cfg.OAuth.AllowProvisioning,
+			AllowIdentity:     cfg.AllowIdentity,
 			AllowJoining:      cfg.OAuth.AllowJoining,
 			Insecure:          cfg.OAuth.Insecure,
 			Log:               stores.Log,

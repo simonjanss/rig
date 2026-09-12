@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -94,7 +95,12 @@ func (s *Service) Provision(ctx context.Context, in ProvisionInput) (*Account, e
 		// A service account gets no identity at all: nobody signs in as one, so
 		// there is no person for it to be, and giving it one would put a row in
 		// the global address space that no human owns.
-		ident, err = s.identityFor(ctx, email, in.EmailAddress, name, in.ByAccountID, in.ByAPIKeyID)
+		tenantID := in.TenantID
+		ident, err = s.identityFor(ctx, newcomer{
+			email: email, asTyped: in.EmailAddress, name: name,
+			via: identity.SourceProvision, tenantID: &tenantID,
+			byAccountID: in.ByAccountID, byAPIKeyID: in.ByAPIKeyID,
+		})
 		if err != nil {
 			return nil, err
 		}
@@ -163,17 +169,52 @@ func (s *Service) Provision(ctx context.Context, in ProvisionInput) (*Account, e
 	return acct, nil
 }
 
+// newcomer is who identityFor is being asked about.
+//
+// A struct rather than six positional parameters, because the sixth was already
+// one too many and this adds a seventh: two *uuid.UUID in a row, either of which
+// may be nil, is a call nobody can read at the site.
+type newcomer struct {
+	// email is normalised and asTyped is not. Both are kept: the lookup is on
+	// the first and the row records the second, so somebody who signs up as
+	// Ada@Example.com is greeted the way they wrote it.
+	email   string
+	asTyped string
+	name    string
+	via     identity.Source
+	// tenantID is the tenant they are being brought into, for the gate. Nil is
+	// not a tenant rather than the nil tenant.
+	tenantID    *uuid.UUID
+	byAccountID *uuid.UUID
+	byAPIKeyID  *uuid.UUID
+}
+
 // identityFor finds the person an address belongs to, creating them if this
 // installation has never seen it.
-func (s *Service) identityFor(
-	ctx context.Context, email, asTyped, name string, by, byKey *uuid.UUID,
-) (*Identity, error) {
-	ident, err := s.cfg.Store.FindIdentityByEmail(ctx, email)
+//
+// The gate is consulted on the second branch only, which is the contract
+// identity.Gate states: somebody who already exists is not a stranger, and
+// asking about them would make an application write a rule about people it has
+// already admitted.
+func (s *Service) identityFor(ctx context.Context, in newcomer) (*Identity, error) {
+	ident, err := s.cfg.Store.FindIdentityByEmail(ctx, in.email)
 	if err != nil {
 		return nil, err
 	}
 	if ident != nil {
 		return ident, nil
+	}
+
+	if err := identity.Allow(ctx, s.cfg.AllowIdentity, identity.Candidate{
+		EmailAddress: in.asTyped,
+		// Not verified, and not verifiable here: an administrator typed this
+		// address in, which is evidence about the administrator rather than
+		// about the address. The invitation mail is what proves it, later.
+		DisplayName: in.name,
+		Via:         in.via,
+		TenantID:    in.tenantID,
+	}); err != nil {
+		return nil, err
 	}
 
 	id, err := uuid.NewV7()
@@ -183,11 +224,11 @@ func (s *Service) identityFor(
 
 	ident = &Identity{
 		ID:           id,
-		EmailAddress: strings.TrimSpace(asTyped),
-		DisplayName:  name,
+		EmailAddress: strings.TrimSpace(in.asTyped),
+		DisplayName:  in.name,
 		IsActive:     true,
-		CreatedBy:    by,
-		CreatedByKey: byKey,
+		CreatedBy:    in.byAccountID,
+		CreatedByKey: in.byAPIKeyID,
 	}
 	if err := s.cfg.Store.InsertIdentity(ctx, ident); err != nil {
 		return nil, err
@@ -256,8 +297,12 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 			email, strings.Join(domains, ", "))
 	}
 
-	ident, err := s.identityFor(ctx, email, in.EmailAddress, displayNameFor(in.EmailAddress),
-		in.ByAccountID, in.ByAPIKeyID)
+	tenantID := in.TenantID
+	ident, err := s.identityFor(ctx, newcomer{
+		email: email, asTyped: in.EmailAddress, name: displayNameFor(in.EmailAddress),
+		via: identity.SourceInvitation, tenantID: &tenantID,
+		byAccountID: in.ByAccountID, byAPIKeyID: in.ByAPIKeyID,
+	})
 	if err != nil {
 		return nil, err
 	}
@@ -349,31 +394,16 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 
 // DomainAllowed reports whether an address may be used in a tenant.
 //
-// An empty list allows anything, because most tenants are not one company and a
-// list that has to be filled in before anybody can be added would be a worse
-// default than no list at all. A listed domain matches its subdomains too:
-// somebody who allows example.com means the company, and mail.example.com is
-// the company.
+// This is the tenant's own list — rig_tenant.allowed_email_domains — and it
+// answers whether somebody may hold an account *here*. Whether they may become
+// an identity at all is a different question at a different time, asked once and
+// not per tenant: see [github.com/simonjanss/rig/auth/identity.Gate].
+//
+// The rule is one rule, so it is written once. This is
+// [github.com/simonjanss/rig/auth/identity.DomainAllowed], kept under this name
+// because [Store] implementations in other packages call it.
 func DomainAllowed(lowercasedEmail string, domains []string) bool {
-	if len(domains) == 0 {
-		return true
-	}
-
-	_, host, found := strings.Cut(lowercasedEmail, "@")
-	if !found || host == "" {
-		return false
-	}
-
-	for _, d := range domains {
-		d = strings.ToLower(strings.TrimSpace(strings.TrimPrefix(d, "@")))
-		if d == "" {
-			continue
-		}
-		if host == d || strings.HasSuffix(host, "."+d) {
-			return true
-		}
-	}
-	return false
+	return identity.DomainAllowed(lowercasedEmail, domains)
 }
 
 func orKind(k Kind) Kind {
