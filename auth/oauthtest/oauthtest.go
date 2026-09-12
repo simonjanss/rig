@@ -64,7 +64,6 @@ const CodeTTL = 2 * time.Minute
 type Server struct {
 	base    string
 	allowed []string
-	own     *httptest.Server
 
 	mu     sync.Mutex
 	codes  map[string]grant
@@ -130,7 +129,6 @@ func Start(tb testing.TB, extraOrigins ...string) *Server {
 	own.Start()
 	tb.Cleanup(own.Close)
 
-	s.own = own
 	return s
 }
 

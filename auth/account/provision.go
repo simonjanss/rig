@@ -207,12 +207,15 @@ func (s *Service) identityFor(ctx context.Context, in newcomer) (*Identity, erro
 
 	if err := identity.Allow(ctx, s.cfg.AllowIdentity, identity.Candidate{
 		EmailAddress: in.asTyped,
-		// Not verified, and not verifiable here: an administrator typed this
-		// address in, which is evidence about the administrator rather than
-		// about the address. The invitation mail is what proves it, later.
-		DisplayName: in.name,
-		Via:         in.via,
-		TenantID:    in.tenantID,
+		// Written out rather than left to the zero value, because it is a
+		// decision rather than an omission: an administrator typed this address
+		// in, which is evidence about the administrator rather than about the
+		// address, and there is nothing here that could prove it. The invitation
+		// mail is what does that, later.
+		EmailVerified: false,
+		DisplayName:   in.name,
+		Via:           in.via,
+		TenantID:      in.tenantID,
 	}); err != nil {
 		return nil, err
 	}

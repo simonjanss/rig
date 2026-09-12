@@ -59,9 +59,14 @@ func (r *Rig) Identities(tb testing.TB) int {
 
 // Account is one person's membership of one tenant.
 type Account struct {
-	ID           uuid.UUID
-	TenantID     uuid.UUID
-	IdentityID   uuid.UUID
+	ID       uuid.UUID
+	TenantID uuid.UUID
+	// IdentityID is the person this account belongs to, and nil for a service
+	// account, which is nobody. A pointer because the column is nullable and the
+	// zero UUID is not the answer: rig_account's own CHECK is
+	// `(kind = 'Person') = (identity_id IS NOT NULL)`, so a test that could not
+	// tell the two apart could not assert on that constraint at all.
+	IdentityID   *uuid.UUID
 	EmailAddress string
 	DisplayName  string
 	Kind         string
@@ -110,7 +115,7 @@ func (r *Rig) Account(tb testing.TB, tenantID, identityID uuid.UUID) *Account {
 	tb.Helper()
 
 	for _, a := range r.Accounts(tb, tenantID) {
-		if a.IdentityID == identityID {
+		if a.IdentityID != nil && *a.IdentityID == identityID {
 			return &a
 		}
 	}

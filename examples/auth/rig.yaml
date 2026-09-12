@@ -66,7 +66,7 @@ auth:
   # Two entries rather than one because this example demonstrates two arrivals:
   # the seeded people are at example.com and the web walkthrough registers at
   # acme.test. A third domain is refused at the provider button and at the code
-  # form alike, and `auth_gate_docker_test.go` is that written down.
+  # form alike, and `gate_docker_test.go` is that written down.
   #
   # An invitation goes through whatever this says. Somebody who is already here
   # typed that address in, and a deployment that could not invite an auditor or

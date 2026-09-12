@@ -101,6 +101,46 @@ func TestReadingIdentitiesAndAccounts(t *testing.T) {
 	if rt.Account(t, tenant.ID, identity) == nil {
 		t.Error("the account exists and Account did not find it")
 	}
+	if accounts[0].IdentityID == nil || *accounts[0].IdentityID != identity {
+		t.Errorf("a person's account points at %v, want %s", accounts[0].IdentityID, identity)
+	}
+}
+
+// TestAServiceAccountBelongsToNobody is why IdentityID is a pointer.
+//
+// rig_account.identity_id is nullable and the table's own CHECK is
+// `(kind = 'Person') = (identity_id IS NOT NULL)`, so "nobody" is a state the
+// schema has. Scanned into a plain uuid.UUID it would arrive as the zero one —
+// no error, and indistinguishable from a person, which is the sort of quiet
+// wrong answer a harness exists to stop.
+func TestAServiceAccountBelongsToNobody(t *testing.T) {
+	t.Parallel()
+
+	rt := start(t)
+	tenant := rt.Tenant(t)
+
+	write(t, rt, `
+		INSERT INTO rig_account (id, tenant_id, kind, email_address, display_name)
+		VALUES ($1, $2, 'Service', 'importer@example.com', 'Importer')`,
+		uuid.New(), tenant.ID)
+
+	accounts := rt.Accounts(t, tenant.ID)
+	if len(accounts) != 1 {
+		t.Fatalf("the tenant has %d accounts, want 1", len(accounts))
+	}
+	if accounts[0].Kind != "Service" {
+		t.Fatalf("read back %+v", accounts[0])
+	}
+	if accounts[0].IdentityID != nil {
+		t.Errorf("a service account belongs to %s, and it belongs to nobody",
+			*accounts[0].IdentityID)
+	}
+
+	// And the lookup does not find it either. A zero UUID matching a service
+	// account would be the same mistake with a caller in front of it.
+	if got := rt.Account(t, tenant.ID, uuid.Nil); got != nil {
+		t.Errorf("looking nobody up found %+v", got)
+	}
 }
 
 // TestTheAuthLogReadsItsOwnEnums is what the outcome constants are for. Both

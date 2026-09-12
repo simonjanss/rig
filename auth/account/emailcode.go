@@ -228,11 +228,14 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 	if ident == nil {
 		if err := identity.Allow(ctx, s.cfg.AllowIdentity, identity.Candidate{
 			EmailAddress: in.EmailAddress,
-			// Unproven, and that is the point of this door: the identity is
-			// created when the code is asked for, not when it is typed back. A
-			// gate that insisted on a verified address here would close it.
-			DisplayName: displayNameFor(in.EmailAddress),
-			Via:         identity.SourceEmailCode,
+			// Written out rather than left to the zero value, because it is a
+			// decision rather than an omission: the identity is created when the
+			// code is asked for, not when it is typed back, so nobody has proved
+			// this address yet. A gate that insisted on a verified one here would
+			// close this door for everybody.
+			EmailVerified: false,
+			DisplayName:   displayNameFor(in.EmailAddress),
+			Via:           identity.SourceEmailCode,
 		}); err != nil {
 			entry.Outcome = authlog.Failed
 			entry.Detail = map[string]any{"reason": "refused by AllowIdentity: " + err.Error()}
