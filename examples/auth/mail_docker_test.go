@@ -37,13 +37,13 @@ func (f *flaky) send(token string) error {
 	return nil
 }
 
-func (f *flaky) SendPasswordReset(_ context.Context, _ *account.Identity, t string) error {
-	return f.send(t)
+func (f *flaky) SendEmailCode(_ context.Context, _ *account.Identity, code string) error {
+	return f.send(code)
 }
 func (f *flaky) SendEmailVerification(_ context.Context, _ *account.Identity, t string) error {
 	return f.send(t)
 }
-func (f *flaky) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Account, t string) error {
+func (f *flaky) SendInvitation(_ context.Context, _ *account.Identity, _ *account.Invitation, t string) error {
 	return f.send(t)
 }
 
@@ -60,13 +60,13 @@ func (f *flaky) sent() []string {
 }
 
 // The whole point of the queue, over the real SQL: a provider that is down does
-// not fail the request, and the link goes out when it comes back.
-func TestAResetSurvivesAProviderBeingDown(t *testing.T) {
+// not fail the request, and the code goes out when it comes back.
+func TestASignInCodeSurvivesAProviderBeingDown(t *testing.T) {
 	s := newServer(t)
 	tenant := s.seed(t)
 
 	// Its own address rather than the seeded one. Several tests here spend the
-	// seeded address's password-reset budget, and the limiter counts per address,
+	// seeded address's code-request budget, and the limiter counts per address,
 	// so a test that borrowed it would fail for a reason it is not about.
 	mailbox := s.emailOf(t, s.addAccount(t, tenant, "outage"))
 
@@ -88,7 +88,9 @@ func TestAResetSurvivesAProviderBeingDown(t *testing.T) {
 	}
 
 	// The request succeeds with the provider hard down, which it did not before.
-	if err := front.Parts().Accounts.RequestPasswordReset(ctx, tenant, mailbox, "203.0.113.9"); err != nil {
+	if err := front.Parts().Accounts.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		TenantID: tenant, EmailAddress: mailbox, IPAddress: "203.0.113.9",
+	}); err != nil {
 		t.Fatalf("the request failed while the provider was down: %v", err)
 	}
 	if got := len(provider.sent()); got != 0 {
@@ -122,15 +124,16 @@ func TestAResetSurvivesAProviderBeingDown(t *testing.T) {
 		t.Fatalf("sent = %d, want 1 (%s)", report.Sent, report)
 	}
 
-	// And the token from the mail actually redeems, which is the assertion the
-	// whole rotate-at-send-time design exists to keep true.
+	// And the code from the mail actually works, which is the assertion the whole
+	// rotate-at-send-time design exists to keep true.
 	sent := provider.sent()
 	if len(sent) != 1 {
 		t.Fatalf("the provider saw %d mails, want 1", len(sent))
 	}
-	if err := front.Parts().Accounts.ConfirmPasswordReset(ctx, sent[0],
-		"a password from the mail that survived", "203.0.113.9"); err != nil {
-		t.Errorf("the token from the queued mail does not redeem: %v", err)
+	if _, err := front.Parts().Accounts.VerifyEmailCode(ctx, account.VerifyEmailCodeInput{
+		TenantID: tenant, EmailAddress: mailbox, Code: sent[0], IPAddress: "203.0.113.9",
+	}); err != nil {
+		t.Errorf("the code from the queued mail does not work: %v", err)
 	}
 }
 
@@ -161,7 +164,9 @@ func TestTwoMailDispatchersSendOnce(t *testing.T) {
 		fronts[i] = f
 	}
 
-	if err := fronts[0].Parts().Accounts.RequestPasswordReset(ctx, tenant, mailbox, "203.0.113.9"); err != nil {
+	if err := fronts[0].Parts().Accounts.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		TenantID: tenant, EmailAddress: mailbox, IPAddress: "203.0.113.9",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -208,7 +213,9 @@ func TestAWithdrawnInvitationIsNotMailed(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if err := front.Parts().Accounts.RequestPasswordReset(ctx, tenant, mailbox, "203.0.113.9"); err != nil {
+	if err := front.Parts().Accounts.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		TenantID: tenant, EmailAddress: mailbox, IPAddress: "203.0.113.9",
+	}); err != nil {
 		t.Fatal(err)
 	}
 
@@ -261,7 +268,9 @@ func TestAQueuedLinkCannotBeRedeemed(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if err := front.Parts().Accounts.RequestPasswordReset(ctx, tenant, mailbox, "203.0.113.9"); err != nil {
+	if err := front.Parts().Accounts.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		TenantID: tenant, EmailAddress: mailbox, IPAddress: "203.0.113.9",
+	}); err != nil {
 		t.Fatal(err)
 	}
 	if got := countDeliveries(t, s.pool, "Pending"); got != 1 {

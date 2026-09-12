@@ -108,6 +108,32 @@ func registerDemo(mux *http.ServeMux, mail *outbox.Box, page *observe.Page,
 		}
 		writeJSON(w, http.StatusOK, messages)
 	})
+
+	// The newest sign-in code for one address, to nobody in particular.
+	//
+	// It is a prop, and it says so on the screen that reads it. Everything else
+	// under this prefix is behind a session; this one cannot be, because the
+	// whole point of a sign-in code is that you do not have one yet — and with
+	// no mail server there is nowhere else for it to appear.
+	//
+	// What it costs, stated plainly because a demo is the wrong place to be
+	// vague about it: anybody who can reach this can sign in as anybody whose
+	// address they know. A real deployment sends mail; that is the difference,
+	// and it is the only one.
+	mux.HandleFunc("GET "+demoPrefix+"code", func(w http.ResponseWriter, r *http.Request) {
+		email := r.URL.Query().Get("email")
+		if email == "" {
+			writeJSON(w, http.StatusBadRequest, map[string]string{"message": "name an address"})
+			return
+		}
+		for _, m := range mail.Messages() {
+			if m.Kind == outbox.KindEmailCode && strings.EqualFold(m.To, email) {
+				writeJSON(w, http.StatusOK, map[string]string{"code": m.Token})
+				return
+			}
+		}
+		writeJSON(w, http.StatusNotFound, map[string]string{"message": "nothing has been mailed there"})
+	})
 }
 
 // SyncSwitchEnv names the container the sync service runs in, and mounting the

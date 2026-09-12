@@ -20,7 +20,7 @@ func authDemo(ctx context.Context, args []string) error {
 	baseURL := client.DefaultBaseURL
 	set := flags("auth", args, &baseURL)
 	email := set.String("email", "ada@example.com", "who to sign in as")
-	password := set.String("password", "correct horse battery staple", "their password")
+	code := set.String("code", "", "the code that was mailed to them — read it off the example's /ui page")
 	tenantSlug := set.String("tenant", "", "the tenant to sign in to, when the server asks for one")
 	if err := set.Parse(args); err != nil {
 		return err
@@ -41,8 +41,8 @@ func authDemo(ctx context.Context, args []string) error {
 		profile.AccessTTL, profile.RotationLeeway)
 	detail("a session lasts %s, or %s when somebody asked to be remembered",
 		profile.RefreshTTL, profile.RememberTTL)
-	detail("registration open: %v; anybody may make a tenant: %v",
-		profile.HasRegistration, profile.HasTenantCreation)
+	detail("mailed-code sign-in: %v; anybody may make a tenant: %v",
+		profile.HasEmailCode, profile.HasTenantCreation)
 
 	step("sign in")
 	var opts []rigclient.CallOption
@@ -53,9 +53,20 @@ func authDemo(ctx context.Context, args []string) error {
 		// query parameter or a header.
 		opts = append(opts, rigclient.WithHeader(profile.TenantHeader, *tenantSlug))
 	}
-	res, err := c.Auth.SignIn(ctx, authwire.LoginRequest{
+	// Two calls, because there are two halves and a mailbox between them. The
+	// first answers 204 whatever you type — registered or not — which is what
+	// keeps it from being a list of who has an account here.
+	if *code == "" {
+		if err := c.Auth.RequestEmailCode(ctx, *email, opts...); err != nil {
+			return err
+		}
+		detail("a code has been mailed to %s", *email)
+		return fmt.Errorf("read the code off the example's /ui page and pass -code")
+	}
+
+	res, err := c.Auth.SignIn(ctx, authwire.VerifyEmailCodeRequest{
 		EmailAddress: *email,
-		Password:     *password,
+		Code:         *code,
 		Client:       "machine",
 	}, opts...)
 	if err != nil {

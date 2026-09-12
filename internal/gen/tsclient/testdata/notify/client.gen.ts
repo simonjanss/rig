@@ -92,7 +92,7 @@ export function createClient(config: Config): Client {
             identityTtlMs: 1800000,
             cacheTtlMs: 0,
             tenantHeader: "X-Tenant-Id",
-            hasRegistration: false,
+            hasEmailCode: false,
             hasTenantCreation: false,
             hasIdentitySessions: true,
             hasApiKeys: true,

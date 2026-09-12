@@ -60,7 +60,8 @@ DEMO_ENV := \
 demo: up seed front
 	@mkdir -p $(RUN_DIR)
 	@echo
-	@echo "open http://localhost:8084 — demo@linearlite.dev / \"correct horse battery staple\""
+	@echo "open http://localhost:8084 — sign in as demo@linearlite.dev; there is no"
+	@echo "password, and with no mail server the code appears on the form itself"
 	@echo "traces and logs at http://localhost:9084/_rig/monitor — its own port, password \"$${RIG_MONITOR_PASSWORD:-$(DEMO_MONITOR_PASSWORD)}\""
 	@echo "the pill in the header stops $(DEMO_SYNC_CONTAINER); the board keeps working without it"
 	@echo

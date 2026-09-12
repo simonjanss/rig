@@ -11,38 +11,66 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 )
 
-// register signs a stranger up on whatever fixture it is handed.
-func register(f *fixture, email string) (account.SignInResult, error) {
-	return f.svc.Register(context.Background(), account.RegisterInput{
+// signUp is a stranger arriving: they type an address rig has never seen,
+// provisioning creates the person, and they type the code back.
+//
+// There is no registration endpoint. With no password there is nothing for one
+// to take, and an endpoint that minted an identity token for anybody who typed
+// an address would be a door rather than a form — so the two halves are split
+// by the proof, and this is both of them.
+func signUp(f *fixture, email string) (account.SignInResult, error) {
+	f.notify.code = ""
+	if err := f.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
 		EmailAddress: email,
-		DisplayName:  "New Person",
-		Password:     goodPassword,
+		IPAddress:    "203.0.113.20",
+		UserAgent:    "Mozilla/5.0",
+	}); err != nil {
+		return account.SignInResult{}, err
+	}
+	if f.notify.code == "" {
+		return account.SignInResult{}, errors.New("no code was mailed")
+	}
+	return f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		EmailAddress: email,
+		Code:         f.notify.code,
 		IPAddress:    "203.0.113.20",
 		UserAgent:    "Mozilla/5.0",
 	})
 }
 
+// open is a fixture where a code may go to an address nothing has ever seen.
+func open(t *testing.T, edit func(*account.Config)) *fixture {
+	return setupWith(t, func(cfg *account.Config) {
+		cfg.EmailCode.AllowProvisioning = true
+		if edit != nil {
+			edit(cfg)
+		}
+	})
+}
+
 func TestOnRegisteredSeesTheNewcomer(t *testing.T) {
 	var got account.Registered
-	f := setupWith(t, func(cfg *account.Config) {
+	f := open(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(_ context.Context, _ *account.Service, in account.Registered) error {
 			got = in
 			return nil
 		}
 	})
 
-	res, err := register(f, "new@example.com")
+	res, err := signUp(f, "new@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 
 	if got.IdentityID != res.IdentityID {
-		t.Errorf("hook saw identity %s, register answered %s", got.IdentityID, res.IdentityID)
+		t.Errorf("hook saw identity %s, the sign-in answered %s", got.IdentityID, res.IdentityID)
 	}
 	if got.EmailAddress != "new@example.com" {
 		t.Errorf("hook saw address %q", got.EmailAddress)
 	}
-	if got.DisplayName != "New Person" {
+	// The local part, because that is all anybody knows about somebody who has
+	// typed nothing but an address.
+	if got.DisplayName != "new" {
 		t.Errorf("hook saw display name %q", got.DisplayName)
 	}
 	if got.IPAddress != "203.0.113.20" || got.UserAgent != "Mozilla/5.0" {
@@ -50,15 +78,18 @@ func TestOnRegisteredSeesTheNewcomer(t *testing.T) {
 	}
 }
 
+// It runs when the code is asked for rather than when it is typed back, because
+// the row holding the code references the person. So a hook that fails fails
+// the request that would have sent the mail.
 func TestOnRegisteredErrorFailsTheSignUp(t *testing.T) {
 	refuse := errors.New("no room")
-	f := setupWith(t, func(cfg *account.Config) {
+	f := open(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(context.Context, *account.Service, account.Registered) error {
 			return refuse
 		}
 	})
 
-	if _, err := register(f, "new@example.com"); !errors.Is(err, refuse) {
+	if _, err := signUp(f, "new@example.com"); !errors.Is(err, refuse) {
 		t.Fatalf("expected the hook's error, got %v", err)
 	}
 	// The memory store has no transactions to roll back — the Postgres store's
@@ -66,29 +97,27 @@ func TestOnRegisteredErrorFailsTheSignUp(t *testing.T) {
 	// come back as the hook's own error rather than something laundered.
 }
 
-// The canonical body: provision the newcomer into a starter tenant, with the
-// verification link that lets them confirm the address.
+// The invite-only reading of the hook, and the one the flow is built around:
+// the newcomer lands in the picker with an invitation waiting rather than in a
+// tenant somebody decided for them.
 //
-// What it does *not* do is leave them outside. Provision creates a live account
-// whether or not Invite is set — the link is a mail, not a pending membership —
-// so the registration answers with that tenant and a session for it, exactly as
-// it does without Invite. The name is the only thing that suggests otherwise.
+// This is now a genuinely different answer from the Provision one below, which
+// is what a flag on one function could never express.
 func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
 	tenant := uuid.New()
-	f := setupWith(t, func(cfg *account.Config) {
+	f := open(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
-			_, err := accounts.Provision(ctx, account.ProvisionInput{
+			_, err := accounts.Invite(ctx, account.InviteInput{
 				TenantID:     tenant,
 				EmailAddress: in.EmailAddress,
 				DisplayName:  in.DisplayName,
-				Invite:       true,
 			})
 			return err
 		}
 	})
 	f.store.TenantNames = map[uuid.UUID]string{tenant: "Starter"}
 
-	res, err := register(f, "new@example.com")
+	res, err := signUp(f, "new@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -104,60 +133,37 @@ func TestOnRegisteredCanLeaveAnInvitationWaiting(t *testing.T) {
 		t.Errorf("invitation is for %s, not the starter tenant", invitations[0].TenantID)
 	}
 
-	// And they are already in it, which is what Provision did.
-	if res.Session == nil || res.TenantID != tenant {
-		t.Errorf("session = %v in %s, want one in the starter tenant", res.Session, res.TenantID)
+	// And they are in no tenant, which is the whole difference. The picker is
+	// what they see, and accepting is what puts them somewhere.
+	if res.Session != nil || len(res.Tenants) != 0 {
+		t.Errorf("session = %v, tenants = %v, want them waiting outside", res.Session, res.Tenants)
 	}
-	if len(res.Tenants) != 1 || res.Tenants[0].TenantID != tenant {
-		t.Errorf("tenants = %v, want the starter tenant", res.Tenants)
+	if res.Identity.Token == "" {
+		t.Fatal("the identity token is the credential the picker runs on")
 	}
 }
 
-func TestRegisterWithoutAHookStillWorks(t *testing.T) {
-	f := setup(t)
+func TestSigningUpWithoutAHookLandsNowhere(t *testing.T) {
+	f := open(t, nil)
 
-	res, err := register(f, "new@example.com")
+	res, err := signUp(f, "new@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
 	if res.Session != nil || len(res.Tenants) != 0 {
-		t.Fatal("a plain registration should land nowhere")
+		t.Fatal("a plain sign-up should land nowhere")
 	}
 	if res.Identity.Token == "" {
 		t.Fatal("expected an identity session")
 	}
 }
 
-// RequireVerifiedEmail refuses a sign-in until the address is confirmed, and
-// registration is the one place that cannot be held to it: the address is one
-// request old and the mail that confirms it has not been opened yet.
-//
-// The identity token registration hands back has never been gated either, which
-// is what makes this consistent rather than an exception — accepting an
-// invitation and creating a tenant both work unverified, and always have.
-func TestRegisterIsNotHeldToTheVerifiedEmailGate(t *testing.T) {
-	f := setupWith(t, func(cfg *account.Config) { cfg.RequireVerifiedEmail = true })
-
-	res, err := register(f, "new@example.com")
-	if err != nil {
-		t.Fatalf("registering should not be refused for an unconfirmed address: %v", err)
-	}
-	if res.Identity.Token == "" {
-		t.Error("no identity token, so there is nothing to reach the picker with")
-	}
-}
-
-// A hook that provisions *without* an invitation puts somebody in a real tenant,
-// and the registration response has to say so.
-//
-// The documented body of OnRegistered is Provision with Invite set, and for that
-// an empty tenant list is the truth. This is the other one, and the answer used
-// to be built by hand on the assumption that it never happened: the newcomer
-// was told they belonged nowhere and had to sign in again to find the tenant
-// they had just been put in.
+// A hook that provisions puts somebody in a real tenant, and the response has
+// to say so — rather than telling a newcomer they belong nowhere and making
+// them sign in again to find the tenant they had just been put in.
 func TestOnRegisteredCanLandSomebodySomewhere(t *testing.T) {
 	tenant := uuid.New()
-	f := setupWith(t, func(cfg *account.Config) {
+	f := open(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
 			_, err := accounts.Provision(ctx, account.ProvisionInput{
 				TenantID:     tenant,
@@ -169,7 +175,7 @@ func TestOnRegisteredCanLandSomebodySomewhere(t *testing.T) {
 	})
 	f.store.TenantNames = map[uuid.UUID]string{tenant: "Starter"}
 
-	res, err := register(f, "new@example.com")
+	res, err := signUp(f, "new@example.com")
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -191,9 +197,9 @@ func TestOnRegisteredCanLandSomebodySomewhere(t *testing.T) {
 
 // The state the two entries describe together: a person was created, and a
 // session was issued for them. Neither says the whole thing on its own.
-func TestRegisteringSomewhereRecordsBothHalves(t *testing.T) {
+func TestSigningUpSomewhereRecordsBothHalves(t *testing.T) {
 	tenant := uuid.New()
-	f := setupWith(t, func(cfg *account.Config) {
+	f := open(t, func(cfg *account.Config) {
 		cfg.OnRegistered = func(ctx context.Context, accounts *account.Service, in account.Registered) error {
 			_, err := accounts.Provision(ctx, account.ProvisionInput{
 				TenantID: tenant, EmailAddress: in.EmailAddress, DisplayName: in.DisplayName,
@@ -203,7 +209,7 @@ func TestRegisteringSomewhereRecordsBothHalves(t *testing.T) {
 	})
 	f.store.TenantNames = map[uuid.UUID]string{tenant: "Starter"}
 
-	if _, err := register(f, "new@example.com"); err != nil {
+	if _, err := signUp(f, "new@example.com"); err != nil {
 		t.Fatal(err)
 	}
 	if _, ok := f.log.last(authlog.EventAccountProvisioned); !ok {

@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/simonjanss/rig/auth"
+	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/oauth"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/migrate"
@@ -242,6 +242,10 @@ var (
 	DefaultRotationLeeway = session.DefaultRotationLeeway
 	DefaultIdentityTTL    = session.DefaultIdentityTTL
 	DefaultStateTTL       = oauth.DefaultStateTTL
+
+	DefaultEmailCodeLength      = account.DefaultEmailCodeLength
+	DefaultEmailCodeTTL         = account.DefaultEmailCodeTTL
+	DefaultEmailCodeMaxAttempts = account.DefaultEmailCodeMaxAttempts
 )
 
 func (p *Project) applyDefaults() {
@@ -489,12 +493,17 @@ func (p *Project) applyAuthDefaults() {
 	setDuration(&a.Session.RotationLeeway, DefaultRotationLeeway)
 	setDuration(&a.Session.IdentityTTL, DefaultIdentityTTL)
 
-	policy := password.DefaultPolicy()
-	if a.Password.MinLength == 0 {
-		a.Password.MinLength = policy.MinLength
-	}
-	if a.Password.MaxLength == 0 {
-		a.Password.MaxLength = policy.MaxLength
+	// Only when the flow is on, following the OAuth block's rule below: a block
+	// somebody filled in and never enabled should read as unfinished rather than
+	// as resolved.
+	if a.EmailCode.Enabled {
+		if a.EmailCode.Length == 0 {
+			a.EmailCode.Length = DefaultEmailCodeLength
+		}
+		setDuration(&a.EmailCode.TTL, DefaultEmailCodeTTL)
+		if a.EmailCode.MaxAttempts == 0 {
+			a.EmailCode.MaxAttempts = DefaultEmailCodeMaxAttempts
+		}
 	}
 
 	standard := throttle.Standard()
@@ -504,10 +513,12 @@ func (p *Project) applyAuthDefaults() {
 	}{
 		{&a.Limits.LoginByEmail, standard.LoginByEmail},
 		{&a.Limits.LoginByIP, standard.LoginByIP},
-		{&a.Limits.PasswordReset, standard.PasswordReset},
+		{&a.Limits.EmailCodeRequest, standard.EmailCodeRequest},
+		{&a.Limits.EmailCodeByIP, standard.EmailCodeByIP},
 		{&a.Limits.VerificationResend, standard.VerificationResend},
 		{&a.Limits.Refresh, standard.Refresh},
 		{&a.Limits.APIKeyFailures, standard.APIKeyFailures},
+		{&a.Limits.InvitationPreview, standard.InvitationPreview},
 	} {
 		if pair.configured.Max == 0 {
 			pair.configured.Max = pair.standard.Max

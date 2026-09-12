@@ -297,9 +297,10 @@ Beyond the todo example's layout, seven directories and one file:
   eleven lines twice.
 
 The `/auth/*` screens are worth knowing about before adding another: `web/src/`
-already covers sign-in, registration, the picker, reset, invitations (send,
-list, withdraw), API keys, a password change, session listing and revocation,
-the authentication trail, and switching tenants. Those calls are hand-written in
+already covers sign-in — one screen where there were four, because a mailed code
+collapses signing in, signing up, forgetting a password and resetting one into
+the same two steps — the picker, invitations (send, list, withdraw), API keys,
+session listing and revocation, the authentication trail, and switching tenants. Those calls are hand-written in
 `web/src/auth/authApi.ts` because they are rig's endpoints rather than this
 schema's — the generated client covers the API and stops at `/auth`.
 

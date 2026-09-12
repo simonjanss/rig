@@ -12,6 +12,16 @@
 // would leave that database and this directory describing different schemas with
 // no way to tell. A change to these tables is a new file at the next number.
 //
+// Migration 1 was rewritten once anyway, and this is the record of it. Removing
+// password authentication took out rig_identity_credential and a value of
+// rig_identity_verification_kind, and making an invitation a pending membership
+// added the columns an invitation carries to rig_identity_verification — none
+// of which can be expressed as a forward migration without leaving the table
+// that holds password hashes in every database that ever had one. It was done
+// in place, on the grounds that rig is pre-v1 and no deployment outside this
+// repository had applied it. That argument is spent: it cannot be made a second
+// time, and the rule above is the rule.
+//
 // The package imports nothing but the standard library and dbschema. That is
 // deliberate and load-bearing: notify's tables reference rig_account, which the
 // tenancy migration here creates, so a project with notifications and no
@@ -53,9 +63,13 @@ func Set() dbschema.Set {
 		Table:  Table,
 		Migrations: []dbschema.Migration{
 			{Number: 1, Name: "tenancy", Tables: []string{
-				"rig_tenant", "rig_identity", "rig_identity_credential",
+				"rig_tenant", "rig_identity",
 				"rig_identity_verification", "rig_account",
 			}},
+			// Only the new table. It also alters rig_account, rig_identity and
+			// rig_identity_verification to add the columns that name a key, and
+			// those three are migration 1's — Set().Tables() must not list one
+			// twice.
 			{Number: 2, Name: "apikeys", Tables: []string{"rig_api_key"}},
 			{Number: 3, Name: "sessions", Tables: []string{
 				"rig_account_token", "rig_auth_log", "rig_identity_session",

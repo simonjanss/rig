@@ -35,11 +35,11 @@ import (
 // Kind is what a message is.
 type Kind string
 
-// The kinds. The first three are links the account service minted; the last is
+// The kinds. The first three are secrets the account service minted; the last is
 // a copy of an inbox line, which is a different thing arriving by the same road.
 const (
 	KindInvitation   Kind = "Invitation"
-	KindReset        Kind = "PasswordReset"
+	KindEmailCode    Kind = "EmailCode"
 	KindVerification Kind = "EmailVerification"
 	KindNotification Kind = "Notification"
 )
@@ -102,22 +102,26 @@ func New(n int) *Box {
 var _ account.Notifier = (*Box)(nil)
 
 // SendInvitation implements [account.Notifier].
-func (b *Box) SendInvitation(_ context.Context, i *account.Identity, a *account.Account, token string) error {
-	tenantID := a.TenantID
+func (b *Box) SendInvitation(_ context.Context, _ *account.Identity, inv *account.Invitation, token string) error {
+	tenantID := inv.TenantID
 	b.add(Message{
-		Kind: KindInvitation, To: i.EmailAddress, DisplayName: i.DisplayName,
-		Subject: "You have been invited to a workspace",
+		Kind: KindInvitation, To: inv.EmailAddress, DisplayName: inv.DisplayName,
+		Subject: "You have been invited to " + inv.TenantName,
 		Token:   token, TenantID: &tenantID,
 	})
 	return nil
 }
 
-// SendPasswordReset implements [account.Notifier].
-func (b *Box) SendPasswordReset(_ context.Context, i *account.Identity, token string) error {
+// SendEmailCode implements [account.Notifier].
+//
+// The one secret here somebody reads out rather than clicks, and the reason
+// this box is on the screen at all: there is no mail server, so the code on the
+// page is the code in the mail.
+func (b *Box) SendEmailCode(_ context.Context, i *account.Identity, code string) error {
 	b.add(Message{
-		Kind: KindReset, To: i.EmailAddress, DisplayName: i.DisplayName,
-		Subject: "Choose a new password",
-		Token:   token,
+		Kind: KindEmailCode, To: i.EmailAddress, DisplayName: i.DisplayName,
+		Subject: "Your sign-in code",
+		Token:   code,
 	})
 	return nil
 }

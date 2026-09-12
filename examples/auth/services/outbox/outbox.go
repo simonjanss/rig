@@ -1,17 +1,18 @@
 // Package outbox is the mail this example would have sent.
 //
 // A [github.com/simonjanss/rig/auth/account.Notifier] delivers the single-use
-// links the auth package mints: invitations, password resets, address
+// secrets the auth package mints: sign-in codes, invitations, address
 // confirmations. Sending mail is deliberately not rig's business — it does not
 // know your templates, your sender, your locale, or whether you use a queue — so
-// what rig provides is the moment a link exists and what it says.
+// what rig provides is the moment a secret exists and what it says.
 //
 // This one keeps the last few in memory so the interface can show them. That is
 // exactly what a real notifier must never do, and the reason it is acceptable
-// here is the reason it is interesting: a live invitation is a credential for as
-// long as it lives, and putting one on a screen is putting a credential on a
-// screen. It is here so that the invitation flow can be demonstrated end to end
-// without a mail server, and the interface says so where it shows them.
+// here is the reason it is interesting: a live sign-in code is a credential for
+// the ten minutes it lasts, and putting one on a screen is putting a credential
+// on a screen. It is here so that signing in and being invited can both be
+// demonstrated end to end without a mail server — the code on the page *is* the
+// code in the mail — and the interface says so where it shows them.
 package outbox
 
 import (
@@ -27,17 +28,17 @@ import (
 	"github.com/simonjanss/rig/notify"
 )
 
-// Kind is what a delivered link is for.
+// Kind is what a delivered secret is for.
 type Kind string
 
 // The kinds, which mirror what the account service mints.
 const (
-	KindInvitation    Kind = "Invitation"
-	KindPasswordReset Kind = "PasswordReset"
-	KindVerification  Kind = "EmailVerification"
+	KindInvitation   Kind = "Invitation"
+	KindEmailCode    Kind = "EmailCode"
+	KindVerification Kind = "EmailVerification"
 )
 
-// Message is one link that would have been mailed.
+// Message is one secret that would have been mailed.
 type Message struct {
 	Kind        Kind
 	To          string
@@ -70,20 +71,24 @@ func New(n int) *Box {
 var _ account.Notifier = (*Box)(nil)
 
 // SendInvitation implements [account.Notifier].
-func (b *Box) SendInvitation(_ context.Context, i *account.Identity, a *account.Account, token string) error {
-	tenantID := a.TenantID
+func (b *Box) SendInvitation(_ context.Context, i *account.Identity, inv *account.Invitation, token string) error {
+	tenantID := inv.TenantID
 	b.add(Message{
-		Kind: KindInvitation, To: i.EmailAddress, DisplayName: i.DisplayName,
-		Token: token, TenantID: &tenantID, TenantRef: a.TenantID.String(),
+		Kind: KindInvitation, To: inv.EmailAddress, DisplayName: inv.DisplayName,
+		Token: token, TenantID: &tenantID, TenantRef: inv.TenantName,
 	})
 	return nil
 }
 
-// SendPasswordReset implements [account.Notifier].
-func (b *Box) SendPasswordReset(_ context.Context, i *account.Identity, token string) error {
+// SendEmailCode implements [account.Notifier].
+//
+// The one secret here that somebody reads out rather than clicks, which is why
+// the interface shows it in full: this is the code you type back, and there is
+// no mail server to go and look in.
+func (b *Box) SendEmailCode(_ context.Context, i *account.Identity, code string) error {
 	b.add(Message{
-		Kind: KindPasswordReset, To: i.EmailAddress,
-		DisplayName: i.DisplayName, Token: token,
+		Kind: KindEmailCode, To: i.EmailAddress,
+		DisplayName: i.DisplayName, Token: code,
 	})
 	return nil
 }

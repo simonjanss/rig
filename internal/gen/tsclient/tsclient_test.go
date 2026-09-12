@@ -472,7 +472,7 @@ func TestTheAuthProfileCarriesEverythingTheGoClientCarries(t *testing.T) {
 		"identityTtlMs: 1800000,",
 		"cacheTtlMs: 0,",
 		`tenantHeader: "X-Tenant-Id",`,
-		"hasRegistration: false,",
+		"hasEmailCode: false,",
 		"hasTenantCreation: false,",
 		"hasIdentitySessions: true,",
 		"hasApiKeys: true,",
@@ -491,7 +491,7 @@ func TestTheAuthProfileCarriesTheOptionalHalf(t *testing.T) {
 	t.Parallel()
 
 	doc := gentest.LoadDocument(t, filepath.Join("testdata", notifyFixture))
-	doc.API.Auth.AllowRegistration = true
+	doc.API.Auth.EmailCode.Enabled = true
 	doc.API.Auth.AllowTenantCreation = true
 	doc.API.Auth.OAuth = &ir.AuthOAuth{
 		Providers: []ir.AuthProvider{{Name: "google"}, {Name: "github"}},
@@ -500,7 +500,7 @@ func TestTheAuthProfileCarriesTheOptionalHalf(t *testing.T) {
 	got := fileOf(t, gentest.Run(t, tsclient.New(), doc, opts()), "client.gen.ts")
 
 	for _, want := range []string{
-		"hasRegistration: true,",
+		"hasEmailCode: true,",
 		"hasTenantCreation: true,",
 		`oauthProviders: ["google", "github"],`,
 	} {

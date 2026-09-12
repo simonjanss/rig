@@ -5,78 +5,59 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
-
-	"github.com/simonjanss/rig/examples/auth/internal/api"
-	"github.com/simonjanss/rig/examples/auth/services/authz"
 )
 
-// signUp creates a tenant and signs its owner in.
+// requestCode asks for a sign-in code.
 //
-// Two API calls now, and nothing else: register, then create. It used to reach
-// past the API into a service of its own, because rig created no tenants — that
-// is the auth package's job now, so the form is a convenience over two endpoints
-// rather than a second way in.
-func (h *Handler) signUp(w http.ResponseWriter, r *http.Request) {
+// It always answers the same way, whether or not the address is registered —
+// which is what makes it safe to be the front door. The code itself lands in the
+// outbox on the page below, because this example has no mail server: the code on
+// the screen *is* the code in the mail.
+func (h *Handler) requestCode(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		h.redirect(w, r, "could not read the form")
 		return
 	}
 
-	// The person first. What comes back is the tenant-less credential, which is
-	// exactly what creating a tenant takes.
-	body, _ := json.Marshal(map[string]any{
-		"emailAddress": r.FormValue("email"),
-		"displayName":  r.FormValue("name"),
-		"password":     r.FormValue("password"),
-	})
+	body, _ := json.Marshal(map[string]any{"emailAddress": r.FormValue("email")})
 
 	req := r.Clone(r.Context())
 	req.Header.Del("Cookie")
 
-	status, out := h.call(req, http.MethodPost, "/auth/register", "", string(body))
-	if status != http.StatusCreated {
+	status, out := h.call(req, http.MethodPost, "/auth/email-code", "", string(body))
+	if status != http.StatusNoContent {
 		h.fail(w, r, status, out)
 		return
 	}
-	var p pair
-	if err := json.Unmarshal(out, &p); err != nil {
-		h.redirect(w, r, "the response could not be read")
-		return
-	}
-
-	// Then the tenant, with the credential the first call handed back.
-	body, _ = json.Marshal(map[string]any{
-		"name": r.FormValue("tenantName"), "client": "Web",
-	})
-	h.leavePicker(w, r, p.IdentityToken, "/auth/tenants", string(body),
-		"tenant created — you are its Owner")
+	h.redirect(w, r, "a code is in the outbox below — type it back to sign in")
 }
 
-// login signs in with an address and a password, and nothing else.
+// signIn types a mailed code back, and nothing else.
 //
 // No tenant, deliberately: nobody knows which tenants an address belongs to
-// until the password has been checked, so a sign-in page that asks first is asking
-// a question the visitor cannot answer. The session lands in one of their
+// until the code has been typed back, so a sign-in page that asks first is
+// asking a question the visitor cannot answer. The session lands in one of their
 // tenants and the tabs under the header reach the rest.
-func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) signIn(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		h.redirect(w, r, "could not read the form")
 		return
 	}
-	h.signInAs(w, r, uuid.Nil, r.FormValue("email"), r.FormValue("password"), "")
+	h.signInAs(w, r, uuid.Nil, r.FormValue("email"), r.FormValue("code"), "")
 }
 
-// signInAs posts to /auth/login and keeps the pair.
+// signInAs posts to /auth/email-code/verify and keeps the pair.
 //
 // A zero tenant means "wherever I belong", and the session that comes back says
 // which — asked for afterwards, because the cookie's tenant is what every later
 // request sends as its header.
-func (h *Handler) signInAs(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, email, password, flash string) {
+func (h *Handler) signInAs(w http.ResponseWriter, r *http.Request, tenantID uuid.UUID, email, code, flash string) {
 	body, _ := json.Marshal(map[string]any{
-		"emailAddress": email, "password": password, "client": "Web",
+		"emailAddress": email, "code": code, "client": "Web",
 	})
 
 	// The header cannot come from the cookie here: there is no session yet. It is
@@ -89,7 +70,7 @@ func (h *Handler) signInAs(w http.ResponseWriter, r *http.Request, tenantID uuid
 		})
 	}
 
-	status, out := h.call(req, http.MethodPost, "/auth/login", "", string(body))
+	status, out := h.call(req, http.MethodPost, "/auth/email-code/verify", "", string(body))
 	if status != http.StatusOK {
 		h.fail(w, r, status, out)
 		return
@@ -189,7 +170,11 @@ func (h *Handler) switchTenant(w http.ResponseWriter, r *http.Request) {
 	h.redirect(w, r, "switched — a new session, for your account in that tenant")
 }
 
-// invite provisions somebody into this tenant and mints an invitation.
+// invite asks somebody to join this tenant, and creates nothing in it.
+//
+// Nobody appears in the people list until they accept. The grants that used to
+// be handed out here go in OnJoined instead, in main.go: the account does not
+// exist yet, so there is nothing to grant them to.
 func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.session(r)
 	if !ok {
@@ -205,7 +190,6 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 		"emailAddress": r.FormValue("email"),
 		"displayName":  r.FormValue("name"),
 		"role":         r.FormValue("role"),
-		"invite":       true,
 	})
 
 	// With a key when one was chosen, which is the point of the selector: the
@@ -215,33 +199,17 @@ func (h *Handler) invite(w http.ResponseWriter, r *http.Request) {
 		token = key
 	}
 
-	status, out := h.call(r, http.MethodPost, "/auth/accounts", token, string(body))
+	status, out := h.call(r, http.MethodPost, "/auth/invitations", token, string(body))
 	if status != http.StatusCreated && status != http.StatusOK {
 		h.fail(w, r, status, out)
 		return
 	}
 
-	// Provisioning gave them a level and no grants: the auth package has no idea
-	// what "Admin" means here, so an invited Admin could sign in and do nothing
-	// until the application says. This is the application saying.
-	var made struct {
-		ID   uuid.UUID `json:"id"`
-		Role string    `json:"role"`
-	}
-	if err := json.Unmarshal(out, &made); err == nil && made.ID != uuid.Nil {
-		grants := append(api.PermissionKeys(), authz.AuthKeys()...)
-		if err := authz.GrantLevel(
-			r.Context(), h.pool, s.TenantID, made.ID, made.Role, grants, h.grantsCache,
-		); err != nil {
-			h.redirect(w, r, "invited, but the role could not be granted: "+err.Error())
-			return
-		}
-	}
-
-	h.redirect(w, r, "invited — the link is in the outbox below")
+	h.redirect(w, r, "invited — the link is in the outbox below, and they are "+
+		"not a member until they follow it")
 }
 
-// revokeInvite withdraws an invitation, which also removes the account it made.
+// revokeInvite withdraws an invitation. There is nothing else to withdraw.
 func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 	s, ok := h.session(r)
 	if !ok {
@@ -259,7 +227,8 @@ func (h *Handler) revokeInvite(w http.ResponseWriter, r *http.Request) {
 		h.fail(w, r, status, out)
 		return
 	}
-	h.redirect(w, r, "invitation withdrawn — the link is dead and the account is gone")
+	h.redirect(w, r, "invitation withdrawn — the link is dead, and nothing was "+
+		"ever created for it to remove")
 }
 
 // accept redeems an invitation and signs the caller in as the invited account.
@@ -270,9 +239,8 @@ func (h *Handler) accept(w http.ResponseWriter, r *http.Request) {
 	}
 
 	body, _ := json.Marshal(map[string]any{
-		"token":    r.FormValue("token"),
-		"password": r.FormValue("password"),
-		"client":   "Web",
+		"token":  r.FormValue("token"),
+		"client": "Web",
 	})
 
 	// Unauthenticated, and with no tenant header: the link says which tenant
@@ -437,40 +405,45 @@ func mustJSON(v any) []byte {
 	return out
 }
 
-// register creates a person and lands them in the picker.
+// preview says what an invitation link is for, without spending it.
 //
-// The first of the two doors a stranger has. It makes no tenant: what comes
-// back is an identity token and a look at the invitations waiting for them, which
-// is the state the picker exists to render.
-func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
+// The one call this interface makes with no credential at all, and the reason
+// the mail is worth sending: somebody who follows the link is signed out on a
+// device this example has never seen, and this is what lets the page say who
+// invited them and where before asking them to sign in.
+func (h *Handler) preview(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseForm(); err != nil {
 		h.redirect(w, r, "could not read the form")
 		return
 	}
 
-	body, _ := json.Marshal(map[string]any{
-		"emailAddress": r.FormValue("email"),
-		"displayName":  r.FormValue("name"),
-		"password":     r.FormValue("password"),
-	})
+	plain := r.Clone(r.Context())
+	plain.Header.Del("Cookie")
 
-	// No cookie and no tenant header: there is nothing to be in yet.
-	req := r.Clone(r.Context())
-	req.Header.Del("Cookie")
-
-	status, out := h.call(req, http.MethodPost, "/auth/register", "", string(body))
-	if status != http.StatusCreated {
+	status, out := h.call(plain, http.MethodGet,
+		"/auth/invitations/preview?token="+url.QueryEscape(r.FormValue("token")), "", "")
+	if status != http.StatusOK {
 		h.fail(w, r, status, out)
 		return
 	}
 
-	var p pair
-	if err := json.Unmarshal(out, &p); err != nil {
-		h.redirect(w, r, "the response could not be read")
+	var got struct {
+		TenantName   string `json:"tenantName"`
+		EmailAddress string `json:"emailAddress"`
+		Role         string `json:"role"`
+		InvitedBy    string `json:"invitedBy"`
+	}
+	if err := json.Unmarshal(out, &got); err != nil {
+		h.redirect(w, r, "the preview could not be read")
 		return
 	}
-	h.setSession(w, p, uuid.Nil)
-	h.redirect(w, r, "account created — pick a tenant or make one")
+
+	by := got.InvitedBy
+	if by == "" {
+		by = "somebody"
+	}
+	h.redirect(w, r, by+" invited "+got.EmailAddress+" to "+got.TenantName+
+		" as "+got.Role+" — accepting is what creates the account")
 }
 
 // join accepts an invitation from the picker.

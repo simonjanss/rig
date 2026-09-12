@@ -11,13 +11,13 @@ import (
 
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
-const goodPassword = "correct horse battery staple"
+// The address every fixture's person has, in the case they typed it.
+const samAddress = "Sam@Example.com"
 
 type clock struct{ at time.Time }
 
@@ -67,16 +67,34 @@ func (r *recorder) last(event string) (authlog.Entry, bool) {
 }
 
 type notifier struct {
-	reset    string
+	code     string
 	verify   string
 	invite   string
-	resetTo  *account.Identity
+	codeTo   *account.Identity
 	verifyTo *account.Identity
-	inviteTo *account.Account
+	inviteTo *account.Invitation
+	// codes is every code this notifier has been handed, so that a test about
+	// superseding can see that the old one and the new one are different.
+	codes []string
+
+	// store, when set, is asked whether a transaction was open at the moment
+	// this was called. It is what TestMailIsNotSentInsideATransaction asserts
+	// on: a real Notifier talks to somebody else's server, and doing that with
+	// a pool connection held is the thing the flows are shaped to avoid.
+	store                *account.MemoryStore
+	codeInTx, inviteInTx bool
 }
 
-func (n *notifier) SendPasswordReset(_ context.Context, i *account.Identity, token string) error {
-	n.reset, n.resetTo = token, i
+// inTx reports whether the store has a transaction open, which is what the
+// notifier wants to know about the moment it is being called in.
+func (n *notifier) inTx() bool {
+	return n.store != nil && n.store.InTransaction()
+}
+
+func (n *notifier) SendEmailCode(_ context.Context, i *account.Identity, code string) error {
+	n.code, n.codeTo = code, i
+	n.codes = append(n.codes, code)
+	n.codeInTx = n.codeInTx || n.inTx()
 	return nil
 }
 
@@ -85,8 +103,9 @@ func (n *notifier) SendEmailVerification(_ context.Context, i *account.Identity,
 	return nil
 }
 
-func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, a *account.Account, token string) error {
-	n.invite, n.inviteTo = token, a
+func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, inv *account.Invitation, token string) error {
+	n.invite, n.inviteTo = token, inv
+	n.inviteInTx = n.inviteInTx || n.inTx()
 	return nil
 }
 
@@ -131,18 +150,19 @@ func setupWith(t *testing.T, edit func(*account.Config)) *fixture {
 	}
 
 	notify := &notifier{}
-	// Cheap argon2 parameters and no padding: the suite is about the rules,
-	// not about how long they take.
+	// No padding: the suite is about the rules, not about how long they take.
 	cfg := account.Config{
 		Store:      store,
 		Sessions:   sessions,
 		Identities: identities,
-		Hasher:     password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 		Log:        log,
 		Notifier:   notify,
-		Limiter:    throttle.New(log.counter).WithClock(c.now),
-		Now:        c.now,
-		Sleep:      func(context.Context, time.Duration) {},
+		// Provisioning off, which is the default and the invite-only reading. A
+		// test that wants the open one turns it on in its own edit closure.
+		EmailCode: account.EmailCodeOptions{Enabled: true},
+		Limiter:   throttle.New(log.counter).WithClock(c.now),
+		Now:       c.now,
+		Sleep:     func(context.Context, time.Duration) {},
 	}
 	if edit != nil {
 		edit(&cfg)
@@ -152,13 +172,17 @@ func setupWith(t *testing.T, edit func(*account.Config)) *fixture {
 		t.Fatal(err)
 	}
 
+	// The store's clock is the fixture's, so that an invitation expires for the
+	// double when it would expire for Postgres.
+	store.Now = c.now
+
 	f := &fixture{
 		svc: svc, store: store, sessions: sessions, identities: identities,
 		log: log, notify: notify, clock: c, tenant: uuid.New(),
 	}
 	f.ident = &account.Identity{
 		ID:           uuid.New(),
-		EmailAddress: "Sam@Example.com",
+		EmailAddress: samAddress,
 		DisplayName:  "Sam",
 		IsActive:     true,
 	}
@@ -169,19 +193,16 @@ func setupWith(t *testing.T, edit func(*account.Config)) *fixture {
 		IsActive:    true,
 	}
 	store.PutPerson(f.ident, f.acct)
-
-	if err := svc.SetPassword(context.Background(), f.ident.ID, goodPassword); err != nil {
-		t.Fatal(err)
-	}
 	return f
 }
 
-// login signs the fixture's person in and hands back the tenant session.
+// login signs the fixture's person in with a mailed code and hands back the
+// tenant session.
 //
 // The pair rather than the whole result, because that is what almost every test
 // here is about. The tests that care about the tenant-less half call signIn.
-func (f *fixture) login(password string) (session.Pair, error) {
-	res, err := f.signIn(password)
+func (f *fixture) login() (session.Pair, error) {
+	res, err := f.signIn()
 	if err != nil {
 		return session.Pair{}, err
 	}
@@ -191,22 +212,89 @@ func (f *fixture) login(password string) (session.Pair, error) {
 	return *res.Session, nil
 }
 
-func (f *fixture) signIn(password string) (account.SignInResult, error) {
-	return f.svc.Login(context.Background(), account.LoginInput{
+// signIn asks for a code and types it back, which is the whole flow.
+func (f *fixture) signIn() (account.SignInResult, error) {
+	code, err := f.askForCode()
+	if err != nil {
+		return account.SignInResult{}, err
+	}
+	return f.verify(code)
+}
+
+// askForCode requests one and reads it out of the notifier, which is the only
+// place the plaintext ever exists.
+func (f *fixture) askForCode() (string, error) {
+	if err := f.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
 		TenantID:     f.tenant,
 		EmailAddress: "sam@example.com",
-		Password:     password,
+		IPAddress:    "203.0.113.10",
+		UserAgent:    "Mozilla/5.0",
+	}); err != nil {
+		return "", err
+	}
+	if f.notify.code == "" {
+		return "", errors.New("no code was mailed")
+	}
+	return f.notify.code, nil
+}
+
+func (f *fixture) verify(code string) (account.SignInResult, error) {
+	return f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		TenantID:     f.tenant,
+		EmailAddress: "sam@example.com",
+		Code:         code,
 		Client:       session.ClientWeb,
 		IPAddress:    "203.0.113.10",
 		UserAgent:    "Mozilla/5.0",
 	})
 }
 
+// askForCodeAs and verifyAs are the two halves for an address that is not the
+// fixture's own.
+func (f *fixture) askForCodeAs(email string) (string, error) {
+	f.notify.code = ""
+	if err := f.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID:     f.tenant,
+		EmailAddress: email,
+		IPAddress:    "203.0.113.10",
+	}); err != nil {
+		return "", err
+	}
+	if f.notify.code == "" {
+		return "", errors.New("no code was mailed")
+	}
+	return f.notify.code, nil
+}
+
+func (f *fixture) verifyAs(email, code string) (account.SignInResult, error) {
+	return f.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		TenantID:     f.tenant,
+		EmailAddress: email,
+		Code:         code,
+		Client:       session.ClientWeb,
+		IPAddress:    "203.0.113.10",
+		UserAgent:    "Mozilla/5.0",
+	})
+}
+
+// wrongCode is a code of the right shape that is not this one, so that a test
+// about a wrong guess is not accidentally a test about a malformed request —
+// the two are charged differently on purpose.
+func wrongCode(code string) string {
+	out := []byte(code)
+	if out[len(out)-1] == '0' {
+		out[len(out)-1] = '1'
+	} else {
+		out[len(out)-1] = '0'
+	}
+	return string(out)
+}
+
 func TestLogin(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	pair, err := f.login(goodPassword)
+	pair, err := f.login()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -234,33 +322,35 @@ func TestTheAddressIsMatchedCaseInsensitively(t *testing.T) {
 
 	f := setup(t)
 	for _, typed := range []string{"SAM@EXAMPLE.COM", "  sam@example.com  ", "Sam@Example.Com"} {
-		_, err := f.svc.Login(context.Background(), account.LoginInput{
-			TenantID: f.tenant, EmailAddress: typed, Password: goodPassword,
-			IPAddress: "203.0.113.10",
-		})
+		code, err := f.askForCodeAs(typed)
 		if err != nil {
+			t.Fatalf("%q should be sent a code: %v", typed, err)
+		}
+		if _, err := f.verifyAs(typed, code); err != nil {
 			t.Errorf("%q should sign in: %v", typed, err)
 		}
 	}
 }
 
-// A wrong password and an address nobody has registered must be indistinguishable.
-func TestAWrongPasswordAndAnUnknownAddressLookTheSame(t *testing.T) {
+// A wrong code and an address nobody has registered must be indistinguishable.
+// The pad in the exported half is what makes that true of the timing too.
+func TestAWrongCodeAndAnUnknownAddressLookTheSame(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
 
-	_, wrong := f.login("not the password")
-	_, unknown := f.svc.Login(context.Background(), account.LoginInput{
-		TenantID: f.tenant, EmailAddress: "nobody@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
+	_, wrong := f.verify(wrongCode(code))
+	_, unknown := f.verifyAs("nobody@example.com", code)
 
 	if wrong == nil || unknown == nil {
 		t.Fatal("both should fail")
 	}
 	if wrong.Error() != unknown.Error() {
-		t.Errorf("the two answers differ:\n  wrong password: %v\n  unknown address: %v", wrong, unknown)
+		t.Errorf("the two answers differ:\n  wrong code: %v\n  unknown address: %v", wrong, unknown)
 	}
 	if !rigerr.Is(wrong, rigerr.CodeUnauthorized) {
 		t.Errorf("err = %v, want 401", wrong)
@@ -272,73 +362,267 @@ func TestAWrongPasswordAndAnUnknownAddressLookTheSame(t *testing.T) {
 	}
 }
 
-// Refusing a disabled account before the password is checked would answer
+// Refusing a disabled account before the code is compared would answer
 // "disabled" to anybody who guessed the address.
-func TestADisabledAccountIsOnlyRevealedToSomebodyWithThePassword(t *testing.T) {
+func TestADisabledAccountIsOnlyRevealedToSomebodyWithTheCode(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
 	f.acct.IsActive = false
 	f.store.Put(f.acct)
 
-	// Right password: 403, and the reason is safe to give.
-	if _, err := f.login(goodPassword); !rigerr.Is(err, rigerr.CodeForbidden) {
-		t.Errorf("err = %v, want 403", err)
-	}
-
-	// Wrong password: 401, exactly as for an enabled account.
-	if _, err := f.login("not the password"); !rigerr.Is(err, rigerr.CodeUnauthorized) {
-		t.Errorf("err = %v, want 401 — the account's state must not leak", err)
-	}
-}
-
-func TestRequireVerifiedEmail(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	strict, err := account.New(account.Config{
-		Store:                f.store,
-		Sessions:             f.sessions,
-		Identities:           f.identities,
-		Hasher:               password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
-		Log:                  f.log,
-		Limiter:              throttle.New(f.log.counter).WithClock(f.clock.now),
-		RequireVerifiedEmail: true,
-		Now:                  f.clock.now,
-		Sleep:                func(context.Context, time.Duration) {},
-	})
+	code, err := f.askForCode()
 	if err != nil {
 		t.Fatal(err)
 	}
 
-	_, err = strict.Login(context.Background(), account.LoginInput{
-		TenantID: f.tenant, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
-	})
-	if !rigerr.Is(err, rigerr.CodeForbidden) {
-		t.Errorf("err = %v, want 403 until the address is confirmed", err)
+	// Wrong code: 401, exactly as for an enabled account. Checked first,
+	// because it is the one that must not leak and the right code consumes.
+	if _, err := f.verify(wrongCode(code)); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		t.Errorf("err = %v, want 401 — the account's state must not leak", err)
+	}
+
+	code, err = f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	// Right code: 403, and the reason is safe to give.
+	if _, err := f.verify(code); !rigerr.Is(err, rigerr.CodeForbidden) {
+		t.Errorf("err = %v, want 403", err)
 	}
 }
 
-// Six wrong passwords and the door closes — with a Retry-After, so a client can
-// do something other than hammer.
-func TestTheLockout(t *testing.T) {
+// A code is guessable in a way a token is not, so it dies of guessing rather
+// than only being slowed down.
+func TestACodeDiesAfterTooManyWrongGuesses(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
 
+	for i := range account.DefaultEmailCodeMaxAttempts {
+		if _, err := f.verify(wrongCode(code)); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+			t.Fatalf("guess %d: err = %v, want 401", i+1, err)
+		}
+	}
+
+	// The right code, and it is dead. That is the difference between a ceiling
+	// on one secret and a rate limit on an address: the limit would still have
+	// let this through.
+	if _, err := f.verify(code); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		t.Errorf("err = %v, want the burned code to stay dead", err)
+	}
+
+	// And asking for another works, which is the answer to somebody burning
+	// your code on purpose.
+	next, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if next == code {
+		t.Fatal("the new code should not be the old one")
+	}
+	if _, err := f.verify(next); err != nil {
+		t.Errorf("a fresh code should work: %v", err)
+	}
+}
+
+// One live code per person, so that "the newest code is the one that works" is
+// true rather than probable.
+func TestAskingAgainSupersedesTheLastCode(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	first, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	second, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if first == second {
+		t.Fatal("two requests should not draw the same code")
+	}
+
+	if _, err := f.verify(first); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		t.Errorf("the superseded code should be refused: %v", err)
+	}
+	if _, err := f.verify(second); err != nil {
+		t.Errorf("the newest code should work: %v", err)
+	}
+}
+
+func TestACodeIsSingleUse(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify(code); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify(code); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		t.Errorf("err = %v, want a consumed code to be refused", err)
+	}
+}
+
+func TestACodeExpires(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.clock.advance(account.DefaultEmailCodeTTL + time.Minute)
+	if _, err := f.verify(code); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		t.Errorf("err = %v, want an expired code to be refused", err)
+	}
+}
+
+// The code is what confirms the address: it went there and came back. So a
+// deployment that demands a verified address is satisfied by the first sign-in
+// rather than deadlocked by it.
+func TestSigningInWithACodeConfirmsTheAddress(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	if f.ident.Verified() {
+		t.Fatal("the fixture's person should start unverified")
+	}
+	if _, err := f.login(); err != nil {
+		t.Fatal(err)
+	}
+
+	after, err := f.store.FindIdentityByID(context.Background(), f.ident.ID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !after.Verified() {
+		t.Error("typing the code back should have confirmed the address")
+	}
+}
+
+// Asking for a code must answer the same way for an address nobody has, or the
+// endpoint is a list of your customers.
+func TestAskingForACodeLooksIdenticalForAnUnknownAddress(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	f.notify.code = ""
+
+	if err := f.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: f.tenant, EmailAddress: "nobody@example.com", IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Errorf("an unknown address should be accepted silently: %v", err)
+	}
+	if f.notify.code != "" {
+		t.Error("nothing should have been mailed")
+	}
+	// Recorded as a failure even so: the row is what an operator reads and what
+	// the limit counts, and only the response is the same.
+	e, ok := f.log.last(authlog.EventEmailCodeRequested)
+	if !ok {
+		t.Fatal("the request should be recorded")
+	}
+	if e.Outcome != authlog.Failed {
+		t.Errorf("outcome = %s, want the row to say it went nowhere", e.Outcome)
+	}
+}
+
+// Off by default, so a deployment is invite-only until it says otherwise.
+func TestACodeReachesANewAddressOnlyWithProvisioning(t *testing.T) {
+	t.Parallel()
+
+	closed := setup(t)
+	if err := closed.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: closed.tenant, EmailAddress: "newcomer@example.com", IPAddress: "203.0.113.11",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if got, _ := closed.store.FindIdentityByEmail(context.Background(), "newcomer@example.com"); got != nil {
+		t.Error("no identity should have been created")
+	}
+
+	open := setupWith(t, func(c *account.Config) {
+		c.EmailCode.AllowProvisioning = true
+	})
+	if err := open.svc.RequestEmailCode(context.Background(), account.RequestEmailCodeInput{
+		TenantID: open.tenant, EmailAddress: "Newcomer@Example.com", IPAddress: "203.0.113.11",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	made, err := open.store.FindIdentityByEmail(context.Background(), "newcomer@example.com")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if made == nil {
+		t.Fatal("provisioning should have created the person")
+	}
+	if made.EmailAddress != "Newcomer@Example.com" {
+		t.Errorf("address = %q, want the cased form they typed", made.EmailAddress)
+	}
+	if made.DisplayName != "Newcomer" {
+		t.Errorf("display name = %q, want the local part", made.DisplayName)
+	}
+	// And they can finish: a person with no tenant signs in and lands in the
+	// picker, which is the state the whole invitation flow runs through.
+	res, err := open.svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+		EmailAddress: "newcomer@example.com", Code: open.notify.code,
+		IPAddress: "203.0.113.11",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if res.Session != nil || res.Identity.Token == "" {
+		t.Error("somebody who belongs nowhere should get an identity token and no session")
+	}
+}
+
+// Five wrong codes and the door closes — with a Retry-After, so a client can do
+// something other than hammer.
+//
+// It takes a fresh code each time, so that the ceiling on one code never fires
+// and what is under test is the limit on the address. That means asking for more
+// codes than the standard hourly limit allows, which the fixture widens here and
+// TestTheRequestLimitBindsFirst is about.
+func TestTheLockout(t *testing.T) {
+	t.Parallel()
+
+	f := setupWith(t, func(c *account.Config) {
+		c.Limits = throttle.Standard()
+		c.Limits.EmailCodeRequest.Max = 50
+		c.Limits.EmailCodeByIP.Max = 50
+	})
+
+	// Each request draws a new code, so the ceiling on one code never fires and
+	// what is being tested is the limit on the address.
 	for i := range 5 {
-		if _, err := f.login("wrong"); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		code, err := f.askForCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.verify(wrongCode(code)); !rigerr.Is(err, rigerr.CodeUnauthorized) {
 			t.Fatalf("attempt %d: err = %v, want 401", i+1, err)
 		}
 	}
 
-	_, err := f.login("wrong")
-	if !rigerr.Is(err, rigerr.CodeRateLimited) {
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.verify(wrongCode(code)); !rigerr.Is(err, rigerr.CodeRateLimited) {
 		t.Fatalf("the sixth attempt should be refused: %v", err)
 	}
-	// Even the right password. That is the point of a lockout.
-	if _, err := f.login(goodPassword); !rigerr.Is(err, rigerr.CodeRateLimited) {
+	// Even the right code. That is the point of a lockout.
+	if _, err := f.verify(code); !rigerr.Is(err, rigerr.CodeRateLimited) {
 		t.Errorf("err = %v, want the lockout to hold", err)
 	}
 
@@ -349,267 +633,107 @@ func TestTheLockout(t *testing.T) {
 	// A locked attempt must not record a failure of its own, or the lockout
 	// would extend itself for as long as somebody kept knocking.
 	before := f.log.count(authlog.EventLoginFailed)
-	_, _ = f.login("wrong")
+	_, _ = f.verify(code)
 	if f.log.count(authlog.EventLoginFailed) != before {
 		t.Error("a refused attempt should not extend its own window")
 	}
 
 	// It ends on its own.
 	f.clock.advance(16 * time.Minute)
-	if _, err := f.login(goodPassword); err != nil {
+	if _, err := f.login(); err != nil {
 		t.Errorf("the window should have passed: %v", err)
 	}
 }
 
-// Four typos and then the right password is a person having a bad morning.
-func TestASuccessClearsTheLockout(t *testing.T) {
+// With the standard numbers the request limit is what somebody actually hits,
+// and it is worth pinning because it means the address lockout is defence in
+// depth here rather than the thing doing the work.
+//
+// Five code requests an hour per address. Reaching the five failed sign-ins that
+// lock an address takes five codes, because the ceiling kills each one after
+// three guesses — so the sixth request is refused before the sixth sign-in can
+// be tried.
+func TestTheRequestLimitBindsFirst(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	for range 4 {
-		_, _ = f.login("wrong")
+	for i := range 5 {
+		if _, err := f.askForCode(); err != nil {
+			t.Fatalf("request %d: %v", i+1, err)
+		}
 	}
-	if _, err := f.login(goodPassword); err != nil {
+
+	_, err := f.askForCode()
+	if !rigerr.Is(err, rigerr.CodeRateLimited) {
+		t.Errorf("err = %v, want the sixth request refused", err)
+	}
+}
+
+// Four fat-fingered codes and then the right one is a person having a bad
+// morning.
+func TestASuccessClearsTheLockout(t *testing.T) {
+	t.Parallel()
+
+	f := setupWith(t, func(c *account.Config) {
+		c.Limits = throttle.Standard()
+		c.Limits.EmailCodeRequest.Max = 50
+		c.Limits.EmailCodeByIP.Max = 50
+	})
+	for range 4 {
+		code, err := f.askForCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		_, _ = f.verify(wrongCode(code))
+	}
+	if _, err := f.login(); err != nil {
 		t.Fatal(err)
 	}
 
 	f.clock.advance(time.Second)
 	for range 4 {
-		if _, err := f.login("wrong"); !rigerr.Is(err, rigerr.CodeUnauthorized) {
+		code, err := f.askForCode()
+		if err != nil {
+			t.Fatal(err)
+		}
+		if _, err := f.verify(wrongCode(code)); !rigerr.Is(err, rigerr.CodeUnauthorized) {
 			t.Fatalf("err = %v, want 401 — the earlier failures were cleared", err)
 		}
 	}
 }
 
-// A cost you can raise but never apply to existing accounts is a cost you have
-// not raised. Login is the only moment the plaintext exists to rehash from.
-func TestLoginUpgradesAnOldHash(t *testing.T) {
+// RequireVerifiedEmail governs the provider door. The code door satisfies it by
+// construction, which is what stops it deadlocking the only way in — and the
+// reason VerifyEmailCode calls the unexported tail.
+func TestRequireVerifiedEmail(t *testing.T) {
 	t.Parallel()
 
-	f := setup(t)
-	before, err := f.store.Credential(context.Background(), f.ident.ID)
-	if err != nil {
-		t.Fatal(err)
-	}
+	f := setupWith(t, func(c *account.Config) { c.RequireVerifiedEmail = true })
 
-	raised, err := account.New(account.Config{
-		Store:      f.store,
-		Sessions:   f.sessions,
-		Identities: f.identities,
-		Hasher:     password.New(password.Params{Memory: 16 * 1024, Iterations: 1, Parallelism: 1}),
-		Log:        f.log,
-		Limiter:    throttle.New(f.log.counter).WithClock(f.clock.now),
-		Now:        f.clock.now,
-		Sleep:      func(context.Context, time.Duration) {},
+	// A provider sign-in for an unconfirmed address is refused.
+	_, err := f.svc.SignInIdentity(context.Background(), account.SignInIdentityInput{
+		IdentityID: f.ident.ID,
+		TenantID:   f.tenant,
+		IPAddress:  "203.0.113.10",
+		Method:     "Google",
 	})
-	if err != nil {
-		t.Fatal(err)
+	if !rigerr.Is(err, rigerr.CodeForbidden) {
+		t.Errorf("err = %v, want 403 until the address is confirmed", err)
 	}
 
-	if _, err := raised.Login(context.Background(), account.LoginInput{
-		TenantID: f.tenant, EmailAddress: "sam@example.com", Password: goodPassword,
-		IPAddress: "203.0.113.10",
+	// The code flow is not, because typing the code is the confirmation.
+	if _, err := f.login(); err != nil {
+		t.Errorf("a mailed code should satisfy the gate it fills in: %v", err)
+	}
+
+	// And now the provider door works too.
+	if _, err := f.svc.SignInIdentity(context.Background(), account.SignInIdentityInput{
+		IdentityID: f.ident.ID,
+		TenantID:   f.tenant,
+		IPAddress:  "203.0.113.10",
+		Method:     "Google",
 	}); err != nil {
-		t.Fatal(err)
-	}
-
-	after, _ := f.store.Credential(context.Background(), f.ident.ID)
-	if after.Params.Memory != 16*1024 {
-		t.Errorf("memory = %d, want the raised cost", after.Params.Memory)
-	}
-	if after.PasswordHash == before.PasswordHash {
-		t.Error("the stored hash should have been replaced")
-	}
-	// And the person can still sign in with the same password.
-	if _, err := f.login(goodPassword); err != nil {
-		t.Errorf("the upgraded hash should still verify: %v", err)
-	}
-}
-
-func TestPasswordReset(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	ctx := context.Background()
-
-	original, err := f.login(goodPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", "203.0.113.10"); err != nil {
-		t.Fatal(err)
-	}
-	if f.notify.reset == "" {
-		t.Fatal("a link should have been handed to the notifier")
-	}
-	// The service must not have the token anywhere a handler could return it:
-	// only the notifier sees it. And it goes to the person, not to one of their
-	// accounts — the password it resets is the same one everywhere.
-	if f.notify.resetTo.ID != f.ident.ID {
-		t.Error("the link went to the wrong person")
-	}
-
-	const newPassword = "a completely different passphrase"
-	if err := f.svc.ConfirmPasswordReset(ctx, f.notify.reset, newPassword, "203.0.113.10"); err != nil {
-		t.Fatal(err)
-	}
-
-	// A reset happens because somebody lost control of the account. Leaving
-	// the old sessions alive leaves whoever took it signed in.
-	if _, err := f.sessions.Verify(ctx, original.Access.Token); err == nil {
-		t.Error("the sessions from before the reset should be gone")
-	}
-
-	if _, err := f.login(goodPassword); err == nil {
-		t.Error("the old password should no longer work")
-	}
-	if _, err := f.login(newPassword); err != nil {
-		t.Errorf("the new password should work: %v", err)
-	}
-	if _, ok := f.log.last(authlog.EventPasswordResetCompleted); !ok {
-		t.Error("the reset should be recorded")
-	}
-}
-
-func TestAResetLinkIsSingleUse(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	ctx := context.Background()
-
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); err != nil {
-		t.Fatal(err)
-	}
-	token := f.notify.reset
-
-	if err := f.svc.ConfirmPasswordReset(ctx, token, "the first new passphrase", ""); err != nil {
-		t.Fatal(err)
-	}
-	if err := f.svc.ConfirmPasswordReset(ctx, token, "the second new passphrase", ""); err == nil {
-		t.Error("a consumed link should not work again")
-	}
-}
-
-func TestAResetLinkExpires(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	ctx := context.Background()
-
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); err != nil {
-		t.Fatal(err)
-	}
-
-	f.clock.advance(account.DefaultResetTTL + time.Minute)
-	if err := f.svc.ConfirmPasswordReset(ctx, f.notify.reset, "a new passphrase entirely", ""); err == nil {
-		t.Error("an expired link should not work")
-	}
-}
-
-// Asking for a reset must answer the same way whether or not the address is
-// registered, or the endpoint is a way to enumerate customers.
-func TestAResetForAnUnknownAddressLooksIdentical(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	if err := f.svc.RequestPasswordReset(context.Background(), f.tenant, "nobody@example.com", ""); err != nil {
-		t.Errorf("an unknown address should answer the same way: %v", err)
-	}
-	if f.notify.reset != "" {
-		t.Error("no link should have been sent")
-	}
-	// It is still recorded, which is what makes the rate limit bite: hammering
-	// addresses costs budget whether or not any of them exist.
-	e, ok := f.log.last(authlog.EventPasswordResetRequested)
-	if !ok {
-		t.Fatal("the attempt should be recorded")
-	}
-	if e.Outcome != authlog.Failed {
-		t.Errorf("outcome = %q, want the log to say no account matched", e.Outcome)
-	}
-}
-
-func TestResetRequestsAreRateLimited(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	ctx := context.Background()
-
-	for i := range 5 {
-		if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); err != nil {
-			t.Fatalf("request %d: %v", i+1, err)
-		}
-	}
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); !rigerr.Is(err, rigerr.CodeRateLimited) {
-		t.Errorf("err = %v, want 429 — a reset endpoint is a mail cannon otherwise", err)
-	}
-}
-
-func TestChangePassword(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-	ctx := context.Background()
-
-	old, err := f.login(goodPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	const newPassword = "an entirely different passphrase"
-	fresh, err := f.svc.ChangePassword(ctx, account.ChangePasswordInput{
-		TenantID: f.tenant, AccountID: f.acct.ID,
-		CurrentPassword: goodPassword, NewPassword: newPassword,
-		IPAddress: "203.0.113.10",
-	})
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	// Every old session dies, and the one making the request is handed a
-	// replacement so the person is not signed out of the tab they are in.
-	if _, err := f.sessions.Verify(ctx, old.Access.Token); err == nil {
-		t.Error("the sessions from before the change should be gone")
-	}
-	if _, err := f.sessions.Verify(ctx, fresh.Access.Token); err != nil {
-		t.Errorf("the caller should be handed a working session: %v", err)
-	}
-
-	if _, err := f.login(newPassword); err != nil {
-		t.Errorf("the new password should work: %v", err)
-	}
-	if _, ok := f.log.last(authlog.EventPasswordChanged); !ok {
-		t.Error("the change should be recorded")
-	}
-}
-
-func TestChangePasswordNeedsTheCurrentOne(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	_, err := f.svc.ChangePassword(context.Background(), account.ChangePasswordInput{
-		TenantID: f.tenant, AccountID: f.acct.ID,
-		CurrentPassword: "not the password", NewPassword: "a new passphrase entirely",
-	})
-	if !rigerr.Is(err, rigerr.CodeUnauthorized) {
-		t.Errorf("err = %v, want 401", err)
-	}
-}
-
-func TestANewPasswordMustSatisfyThePolicy(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	_, err := f.svc.ChangePassword(context.Background(), account.ChangePasswordInput{
-		TenantID: f.tenant, AccountID: f.acct.ID,
-		CurrentPassword: goodPassword, NewPassword: "short",
-	})
-	if !rigerr.Is(err, rigerr.CodeUnprocessableEntity) {
-		t.Errorf("err = %v, want the policy to refuse it", err)
+		t.Errorf("the address is confirmed now: %v", err)
 	}
 }
 
@@ -655,13 +779,15 @@ func TestBadLinksAllLookAlike(t *testing.T) {
 	f := setup(t)
 	ctx := context.Background()
 
-	if err := f.svc.RequestPasswordReset(ctx, f.tenant, "sam@example.com", ""); err != nil {
+	other := uuid.New()
+	if _, err := f.svc.Invite(ctx, account.InviteInput{
+		TenantID: other, EmailAddress: "sam@example.com",
+	}); err != nil {
 		t.Fatal(err)
 	}
-	real := f.notify.reset
 
-	// A reset link is not a verification link, even though both are tokens.
-	kindMismatch := f.svc.VerifyEmail(ctx, real)
+	// An invitation is not a verification link, even though both are tokens.
+	kindMismatch := f.svc.VerifyEmail(ctx, f.notify.invite)
 	invented := f.svc.VerifyEmail(ctx, strings.Repeat("A", 52))
 	garbage := f.svc.VerifyEmail(ctx, "not base32 at all !!!")
 
@@ -725,7 +851,7 @@ func TestEndingAnOrdinarySessionIsNotImpersonation(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	pair, err := f.login(goodPassword)
+	pair, err := f.login()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -763,7 +889,7 @@ func TestLogoutEndsTheSessionAndRefreshContinuesIt(t *testing.T) {
 
 	f := setup(t)
 
-	pair, err := f.login(goodPassword)
+	pair, err := f.login()
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -793,48 +919,6 @@ func TestLogoutEndsTheSessionAndRefreshContinuesIt(t *testing.T) {
 	}
 }
 
-// SetPassword is what provisioning and an administrator's rescue both go
-// through, so the guards on it are the guards on both.
-func TestSetPassword(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	if err := f.svc.SetPassword(context.Background(), uuid.New(), goodPassword); err == nil {
-		t.Error("an account that is not there should be a 404, not a credential nobody owns")
-	} else if rigerr.CodeOf(err) != rigerr.CodeNotFound {
-		t.Errorf("code = %q, want NotFound", rigerr.CodeOf(err))
-	}
-
-	// The policy applies here too. An administrator setting "12345" is the
-	// same weak password as anybody else setting it.
-	if err := f.svc.SetPassword(context.Background(), f.ident.ID, "short"); err == nil {
-		t.Error("the policy should apply to an administrative reset")
-	}
-
-	pair, err := f.login(goodPassword)
-	if err != nil {
-		t.Fatal(err)
-	}
-
-	const replacement = "a different long enough password"
-	if err := f.svc.SetPassword(context.Background(), f.ident.ID, replacement); err != nil {
-		t.Fatal(err)
-	}
-
-	// Sessions go either way: the reason to set a password over somebody's head
-	// is usually that the account is compromised.
-	if _, err := f.sessions.Verify(context.Background(), pair.Access.Token); err == nil {
-		t.Error("the old sessions should be gone")
-	}
-	if _, err := f.login(replacement); err != nil {
-		t.Errorf("the new password should work: %v", err)
-	}
-	if _, err := f.login(goodPassword); err == nil {
-		t.Error("the old one should not")
-	}
-}
-
 // A tenant identifier that does not match is the cross-tenant case, and it has
 // to answer the same way as an identifier that does not exist — anything else
 // makes account identifiers probeable across customers.
@@ -848,47 +932,11 @@ func TestAnotherTenantsAccountIsNotFound(t *testing.T) {
 		t.Errorf("SendEmailVerification: code = %q, want NotFound", rigerr.CodeOf(err))
 	}
 
-	_, err := f.svc.ChangePassword(context.Background(), account.ChangePasswordInput{
-		TenantID: elsewhere, AccountID: f.acct.ID,
-		CurrentPassword: goodPassword, NewPassword: "a different long enough password",
-	})
-	if rigerr.CodeOf(err) != rigerr.CodeNotFound {
-		t.Errorf("ChangePassword: code = %q, want NotFound", rigerr.CodeOf(err))
-	}
-
-	_, err = f.svc.Impersonate(context.Background(), account.ImpersonateInput{
+	_, err := f.svc.Impersonate(context.Background(), account.ImpersonateInput{
 		TenantID: elsewhere, AdministratorID: uuid.New(), AccountID: f.acct.ID,
 	})
 	if rigerr.CodeOf(err) != rigerr.CodeNotFound {
 		t.Errorf("Impersonate: code = %q, want NotFound", rigerr.CodeOf(err))
-	}
-}
-
-// An account provisioned through OAuth has no password at all, and telling
-// somebody the current one is wrong when there is no current one sends them to
-// a reset link they will not be able to explain.
-func TestChangingAPasswordThatWasNeverSetSaysSo(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	fresh := &account.Account{
-		ID: uuid.New(), TenantID: f.tenant, DisplayName: "Robin", IsActive: true,
-	}
-	f.store.PutPerson(&account.Identity{
-		ID: uuid.New(), EmailAddress: "robin@example.com",
-		DisplayName: "Robin", IsActive: true,
-	}, fresh)
-
-	_, err := f.svc.ChangePassword(context.Background(), account.ChangePasswordInput{
-		TenantID: f.tenant, AccountID: fresh.ID,
-		CurrentPassword: "anything", NewPassword: "a long enough new password",
-	})
-	if err == nil {
-		t.Fatal("changing a password that does not exist should fail")
-	}
-	if !strings.Contains(err.Error(), "reset") {
-		t.Errorf("the message should point at the way out: %v", err)
 	}
 }
 
@@ -921,32 +969,11 @@ func TestVerificationResendsAreRateLimited(t *testing.T) {
 	}
 }
 
-// A reset link is not a way around the password policy.
-func TestAResetCannotSetAPasswordThePolicyRefuses(t *testing.T) {
-	t.Parallel()
-
-	f := setup(t)
-
-	if err := f.svc.RequestPasswordReset(context.Background(), f.tenant, "sam@example.com", "203.0.113.10"); err != nil {
-		t.Fatal(err)
-	}
-
-	if err := f.svc.ConfirmPasswordReset(context.Background(), f.notify.reset, "short", "203.0.113.10"); err == nil {
-		t.Fatal("the policy should apply to a reset")
-	}
-
-	// And the link survives the refusal: making somebody request a new link
-	// because they typed a short password once is a bad afternoon.
-	if err := f.svc.ConfirmPasswordReset(context.Background(), f.notify.reset,
-		"a long enough new password", "203.0.113.10"); err != nil {
-		t.Errorf("the link should still be good: %v", err)
-	}
-}
-
-// Login is padded so that response time does not reveal whether an account
-// exists — an unknown address skips the hash entirely and would otherwise
-// answer in a fraction of the time a real one takes.
-func TestLoginTakesTheSameFloorWhoeverAsks(t *testing.T) {
+// The verify is padded so that response time does not reveal whether an address
+// has an account. With no password to verify there is no expensive work making
+// the two paths cost the same, so the floor is the whole of it — which is why
+// there is a test about the floor rather than only about the answer.
+func TestVerifyTakesTheSameFloorWhoeverAsks(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
@@ -956,9 +983,9 @@ func TestLoginTakesTheSameFloorWhoeverAsks(t *testing.T) {
 		Store:      f.store,
 		Sessions:   f.sessions,
 		Identities: f.identities,
-		Hasher:     password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 		Log:        f.log,
 		Notifier:   f.notify,
+		EmailCode:  account.EmailCodeOptions{Enabled: true},
 		Limiter:    throttle.New(f.log.counter).WithClock(f.clock.now),
 		Now:        f.clock.now,
 		// The real floor, and a recording of what it asked for. Actually
@@ -971,23 +998,21 @@ func TestLoginTakesTheSameFloorWhoeverAsks(t *testing.T) {
 	}
 
 	for _, address := range []string{"sam@example.com", "nobody@example.com"} {
-		if _, err := svc.Login(context.Background(), account.LoginInput{
-			TenantID: f.tenant, EmailAddress: address, Password: "nope",
+		if _, err := svc.VerifyEmailCode(context.Background(), account.VerifyEmailCodeInput{
+			TenantID: f.tenant, EmailAddress: address, Code: "000000",
 			Client: session.ClientWeb, IPAddress: "203.0.113.10",
 		}); err == nil {
-			t.Fatalf("%s: the login should have failed", address)
+			t.Fatalf("%s: the sign-in should have failed", address)
 		}
 	}
 
 	if len(waited) != 2 {
-		t.Fatalf("padded %d logins, want both", len(waited))
-	}
-	// The unknown address does no work at all, so it is the one with something
-	// left to wait for.
-	if waited[1] <= 0 {
-		t.Errorf("an address that does no hashing should still take the floor: %v", waited)
+		t.Fatalf("padded %d sign-ins, want both", len(waited))
 	}
 	for _, d := range waited {
+		if d <= 0 {
+			t.Errorf("both paths should still owe the floor: %v", waited)
+		}
 		if d > 750*time.Millisecond {
 			t.Errorf("waited %s, longer than the floor itself", d)
 		}
@@ -1005,9 +1030,9 @@ func TestTheDefaultPaddingStopsWhenTheRequestDoes(t *testing.T) {
 		Store:       f.store,
 		Sessions:    f.sessions,
 		Identities:  f.identities,
-		Hasher:      password.New(password.Params{Memory: 8 * 1024, Iterations: 1, Parallelism: 1}),
 		Log:         f.log,
 		Notifier:    f.notify,
+		EmailCode:   account.EmailCodeOptions{Enabled: true},
 		Limiter:     throttle.New(f.log.counter).WithClock(f.clock.now),
 		Now:         f.clock.now,
 		MinDuration: time.Hour,
@@ -1023,8 +1048,8 @@ func TestTheDefaultPaddingStopsWhenTheRequestDoes(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		_, _ = svc.Login(ctx, account.LoginInput{
-			TenantID: f.tenant, EmailAddress: "nobody@example.com", Password: "nope",
+		_, _ = svc.VerifyEmailCode(ctx, account.VerifyEmailCodeInput{
+			TenantID: f.tenant, EmailAddress: "nobody@example.com", Code: "000000",
 			Client: session.ClientWeb, IPAddress: "203.0.113.10",
 		})
 	}()
@@ -1033,5 +1058,74 @@ func TestTheDefaultPaddingStopsWhenTheRequestDoes(t *testing.T) {
 	case <-done:
 	case <-time.After(5 * time.Second):
 		t.Fatal("the padding outlived the request")
+	}
+}
+
+// A code minted and never sent has no secret, so nothing can match it — and a
+// deployment that enables the flow without a way to send is refused rather than
+// left minting into a void.
+func TestEmailCodeRefusesToExistWithNoNotifier(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	_, err := account.New(account.Config{
+		Store:      f.store,
+		Sessions:   f.sessions,
+		Identities: f.identities,
+		Log:        f.log,
+		EmailCode:  account.EmailCodeOptions{Enabled: true},
+		Limiter:    throttle.New(f.log.counter).WithClock(f.clock.now),
+		Now:        f.clock.now,
+	})
+	if err == nil {
+		t.Fatal("a code flow with no Notifier should be refused")
+	}
+	if !strings.Contains(err.Error(), "Notifier") {
+		t.Errorf("err = %v, want it to name what is missing", err)
+	}
+}
+
+// Six to ten digits, and the reason is the ceiling: four digits with any
+// workable number of attempts is not a credential.
+func TestEmailCodeRefusesALengthThatCannotBeSafe(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	for _, length := range []int{4, 5, 11} {
+		_, err := account.New(account.Config{
+			Store:      f.store,
+			Sessions:   f.sessions,
+			Identities: f.identities,
+			Log:        f.log,
+			Notifier:   f.notify,
+			EmailCode:  account.EmailCodeOptions{Enabled: true, Length: length},
+			Limiter:    throttle.New(f.log.counter).WithClock(f.clock.now),
+			Now:        f.clock.now,
+		})
+		if err == nil {
+			t.Errorf("a length of %d should be refused", length)
+		}
+	}
+}
+
+// Leading zeros are part of the secret, and stripping them is the bug that
+// ships in half the implementations of this flow.
+func TestACodeKeepsItsLeadingZeros(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	code, err := f.askForCode()
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(code) != account.DefaultEmailCodeLength {
+		t.Fatalf("code = %q, want %d digits", code, account.DefaultEmailCodeLength)
+	}
+
+	// Typed with the spacing somebody pastes, which has to be tolerated, and
+	// with the zeros intact, which has to matter.
+	spaced := code[:3] + " " + code[3:]
+	if _, err := f.verify(spaced); err != nil {
+		t.Errorf("a pasted code should be read: %v", err)
 	}
 }

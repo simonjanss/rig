@@ -18,6 +18,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5/pgxpool"
+
+	"github.com/simonjanss/rig/examples/auth/services/outbox"
 )
 
 // The interface, driven the way somebody would click it.
@@ -37,7 +39,7 @@ func TestTheInterface(t *testing.T) {
 
 	t.Run("a stranger is offered a way in", func(t *testing.T) {
 		page := ui.get(t, "/ui")
-		for _, want := range []string{"Create a tenant", "Sign in", "Accept an invitation"} {
+		for _, want := range []string{"Ask for a code", "Type the code back", "Land on an invitation"} {
 			if !strings.Contains(page, want) {
 				t.Errorf("the welcome page should offer %q", want)
 			}
@@ -45,14 +47,20 @@ func TestTheInterface(t *testing.T) {
 		if strings.Contains(page, "Sign out") {
 			t.Error("a stranger is not signed in")
 		}
+		// Nothing anywhere asks for a password, because there is nothing to ask
+		// for. This is the assertion #165 is about: the surface is gone, not
+		// merely unused.
+		if strings.Contains(page, `type="password"`) {
+			t.Error("no form should ask for a password")
+		}
 		// And the sign-in form does not ask which tenant, because the visitor
 		// cannot know: nobody can say which tenants an address belongs to until
-		// the password has been checked.
+		// the code has come back.
 		//
 		// Scoped to that form. Naming the tenant you are creating is a different
 		// field on a different form, and asserting over the whole page would catch
 		// it.
-		form, ok := between(page, `action="/ui/login"`, "</form>")
+		form, ok := between(page, `action="/ui/signin"`, "</form>")
 		if !ok {
 			t.Fatal("no sign-in form")
 		}
@@ -64,14 +72,15 @@ func TestTheInterface(t *testing.T) {
 	tenant := "Acme " + uuid.NewString()[:8]
 	owner := "ada-" + uuid.NewString()[:8] + "@acme.test"
 
-	t.Run("creating a tenant signs its owner in", func(t *testing.T) {
-		page := ui.post(t, "/ui/signup", url.Values{
-			"tenantName": {tenant},
-			"name":       {"Ada"},
-			"email":      {owner},
-			"password":   {"a long enough password"},
-		})
+	t.Run("a code signs somebody in, and they make a tenant", func(t *testing.T) {
+		// The address is new, so asking for a code creates the person: that is
+		// allow_provisioning, and it is what makes this the front door.
+		page := ui.signIn(t, owner)
+		if !strings.Contains(page, "pick a tenant or make one") {
+			t.Fatalf("a newcomer should land in the picker:\n%s", excerpt(page))
+		}
 
+		page = ui.post(t, "/ui/tenants", url.Values{"tenantName": {tenant}})
 		if !strings.Contains(page, "tenant created") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
 		}
@@ -92,8 +101,11 @@ func TestTheInterface(t *testing.T) {
 		if !strings.Contains(page, "note written with your session") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
 		}
-		if !strings.Contains(page, "by Ada") {
-			t.Error("the note should be attributed to the person who wrote it")
+		// The local part, because that is all anybody knows about somebody who
+		// has typed nothing but an address. Naming yourself is a later edit,
+		// not part of getting in.
+		if !strings.Contains(page, "by "+strings.SplitN(owner, "@", 2)[0]) {
+			t.Errorf("the note should be attributed to the person who wrote it:\n%s", excerpt(page))
 		}
 	})
 
@@ -147,10 +159,24 @@ func TestTheInterface(t *testing.T) {
 		if !strings.Contains(page, "invited") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
 		}
-		// Invited and not yet arrived: the account exists, the address is not
-		// confirmed, and there is no password.
-		if !strings.Contains(page, guest) {
-			t.Error("the invited person should appear in the list")
+
+		// Invited and not yet arrived, which now means exactly that: there is no
+		// account, so she is not in the tenant's people list. This is the
+		// assertion #164 is about, and it used to say the opposite.
+		var members int
+		if err := ui.pool.QueryRow(context.Background(), `
+			SELECT count(*) FROM rig_account
+			 WHERE lower(email_address) = lower($1) AND deleted_at IS NULL`,
+			guest).Scan(&members); err != nil {
+			t.Fatal(err)
+		}
+		if members != 0 {
+			t.Errorf("%d accounts for somebody who has not accepted, want 0", members)
+		}
+		// She is listed as a pending invitation, which is a different panel and
+		// a different claim.
+		if !strings.Contains(page, "Pending invitations") || !strings.Contains(page, guest) {
+			t.Error("she should be waiting rather than present")
 		}
 
 		invitation = findToken(page)
@@ -165,8 +191,9 @@ func TestTheInterface(t *testing.T) {
 			t.Fatal("the panel should be there")
 		}
 
-		// Withdrawn, then invited again — which only works because withdrawing
-		// removes the account as well as killing the link.
+		// Withdrawn, then invited again. It used to be that this only worked
+		// because withdrawing removed the account too; there is no account, so
+		// withdrawing is one write and re-inviting is unremarkable.
 		id := invitationID(t, ui.pool, guest)
 		page = ui.post(t, "/ui/invite/revoke", url.Values{"id": {id}})
 		if !strings.Contains(page, "withdrawn") {
@@ -205,9 +232,10 @@ func TestTheInterface(t *testing.T) {
 			t.Errorf("the owner holds authlog.read.all and was refused:\n%s", panel)
 		}
 
-		// No LoginSucceeded yet, and that is right: creating a tenant is register
-		// then create, and neither is a sign-in. The sub-tests below do sign in and
-		// the event turns up there.
+		// A code request names no tenant — it happens before anybody knows
+		// which one — so it is not in a panel scoped to this tenant, and that
+		// is the scoping working rather than a gap. What is here is everything
+		// that happened once there was a tenant to happen in.
 		for _, want := range []string{
 			"AccountProvisioned", "InvitationSent", "InvitationRevoked",
 		} {
@@ -215,16 +243,31 @@ func TestTheInterface(t *testing.T) {
 				t.Errorf("the auth log should show %q", want)
 			}
 		}
+		if strings.Contains(panel, "EmailCodeRequested") {
+			t.Error("a tenant-less request should not be readable through a tenant's trail")
+		}
 	})
 
 	t.Run("accepting it joins that tenant", func(t *testing.T) {
 		// A fresh browser: the invited person is not the person who invited them.
 		guestUI := newBrowser(t)
 
-		page := guestUI.post(t, "/ui/accept", url.Values{
-			"token":    {invitation},
-			"password": {"grace picked this one"},
-		})
+		// Look first. This is what the mail is for: a page that can say where
+		// somebody has been invited before asking them to prove anything.
+		looked := guestUI.post(t, "/ui/invite/preview", url.Values{"token": {invitation}})
+		if !strings.Contains(looked, tenant) {
+			t.Errorf("the preview should name the tenant:\n%s", excerpt(looked))
+		}
+		if !strings.Contains(looked, strings.SplitN(owner, "@", 2)[0]) {
+			t.Errorf("the preview should name who invited them:\n%s", excerpt(looked))
+		}
+		// Masked, because holding a forwarded link does not prove you are its
+		// addressee.
+		if strings.Contains(looked, guest) {
+			t.Errorf("the preview should mask the address:\n%s", excerpt(looked))
+		}
+
+		page := guestUI.post(t, "/ui/accept", url.Values{"token": {invitation}})
 		if !strings.Contains(page, "joined") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
 		}
@@ -238,10 +281,7 @@ func TestTheInterface(t *testing.T) {
 
 		// And it is spent. A link forwarded to somebody else is not a second
 		// invitation.
-		again := newBrowser(t).post(t, "/ui/accept", url.Values{
-			"token":    {invitation},
-			"password": {"somebody else entirely"},
-		})
+		again := newBrowser(t).post(t, "/ui/accept", url.Values{"token": {invitation}})
 		if !strings.Contains(again, "already been used") &&
 			!strings.Contains(again, "not valid") {
 			t.Errorf("a consumed invitation should be refused:\n%s", excerpt(again))
@@ -250,12 +290,9 @@ func TestTheInterface(t *testing.T) {
 
 	t.Run("signing in needs no tenant, and the tabs reach them all", func(t *testing.T) {
 		fresh := newBrowser(t)
-		page := fresh.post(t, "/ui/login", url.Values{
-			"email":    {owner},
-			"password": {"a long enough password"},
-		})
+		page := fresh.signIn(t, owner)
 		if !strings.Contains(page, "Sign out") {
-			t.Fatalf("an address and a password should be enough:\n%s", excerpt(page))
+			t.Fatalf("an address and a code should be enough:\n%s", excerpt(page))
 		}
 		if !strings.Contains(page, tenant) {
 			t.Errorf("it should land in a tenant they belong to:\n%s", excerpt(page))
@@ -270,20 +307,13 @@ func TestTheInterface(t *testing.T) {
 		}
 	})
 
-	t.Run("one password reaches two tenants", func(t *testing.T) {
+	t.Run("one address reaches two tenants", func(t *testing.T) {
 		guestUI := newBrowser(t)
 
-		// Grace makes her own tenant, with the password she chose when she accepted
-		// the invitation. One identity, two accounts, two roles.
-		//
-		// Signing in first rather than through the combined form: that form
-		// registers and then creates, and she already exists. This is the path the
-		// picker is for — somebody who is somewhere already, starting somewhere
-		// else.
+		// Grace makes her own tenant. One identity, two accounts, two roles —
+		// and nothing to remember for either.
 		second := "Grace " + uuid.NewString()[:8]
-		if page := guestUI.post(t, "/ui/login", url.Values{
-			"email": {guest}, "password": {"grace picked this one"},
-		}); !strings.Contains(page, "Sign out") {
+		if page := guestUI.signIn(t, guest); !strings.Contains(page, "Sign out") {
 			t.Fatalf("she should sign in to the tenant she joined:\n%s", excerpt(page))
 		}
 
@@ -300,7 +330,7 @@ func TestTheInterface(t *testing.T) {
 			t.Error("the current tenant should be marked")
 		}
 
-		// Switching needs no password: she has already proved who she is.
+		// Switching needs no secret at all: she has already proved who she is.
 		tenantID := tenantOf(t, ui.pool, tenant)
 		page = guestUI.post(t, "/ui/switch", url.Values{"tenant": {tenantID.String()}})
 		if !strings.Contains(page, "switched") {
@@ -362,6 +392,10 @@ type browser struct {
 	base   *url.URL
 	pool   *pgxpool.Pool
 	srv    string
+	// mail is this run's mailbox, which is where a sign-in code exists in
+	// plaintext. The interface shows it too; reading it here is the same act
+	// with less parsing.
+	mail *outbox.Box
 }
 
 func newBrowser(t *testing.T) *browser {
@@ -392,7 +426,7 @@ func newBrowser(t *testing.T) *browser {
 	// rig.yaml names is a port nothing here is listening on.
 	origin := "http://" + srv.Listener.Addr().String()
 
-	handler, front, _, err := newAPI(context.Background(), pool, origin, slog.Default())
+	handler, front, _, mail, err := newAPI(context.Background(), pool, origin, slog.Default())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -412,8 +446,37 @@ func newBrowser(t *testing.T) *browser {
 
 	return &browser{
 		client: &http.Client{Jar: jar},
-		jar:    jar, base: base, pool: pool, srv: srv.URL,
+		jar:    jar, base: base, pool: pool, srv: srv.URL, mail: mail,
 	}
+}
+
+// signIn is the whole flow through the interface: ask for a code, read it out
+// of the mailbox, and type it back.
+//
+// It is also how somebody rig has never seen arrives, because this example sets
+// allow_provisioning: the first request creates the person.
+func (b *browser) signIn(t *testing.T, email string) string {
+	t.Helper()
+
+	if page := b.post(t, "/ui/code", url.Values{"email": {email}}); !strings.Contains(page, "a code is in the outbox") {
+		t.Fatalf("asking for a code:\n%s", excerpt(page))
+	}
+	return b.post(t, "/ui/signin", url.Values{
+		"email": {email}, "code": {b.codeFor(t, email)},
+	})
+}
+
+// codeFor is the newest code mailed to an address.
+func (b *browser) codeFor(t *testing.T, email string) string {
+	t.Helper()
+
+	for _, m := range b.mail.Messages() {
+		if m.Kind == outbox.KindEmailCode && strings.EqualFold(m.To, email) {
+			return m.Token
+		}
+	}
+	t.Fatalf("no code was mailed to %s", email)
+	return ""
 }
 
 // read is the body, which is what every assertion here looks at.
@@ -522,7 +585,7 @@ func stripTags(s string) string {
 // makes it the check that the default did not move, and what makes it the wrong
 // place for this. Here nobody knows the tenant: `/start` is an anonymous browser
 // GET, the resolver answers uuid.Nil, and where somebody goes is settled after
-// the callback from their own memberships, exactly as a password login settles
+// the callback from their own memberships, exactly as a code sign-in settles
 // it.
 //
 // The interesting half is the page that comes back. A 200 with an identity
@@ -611,19 +674,19 @@ func TestSigningInWithAProvider(t *testing.T) {
 		}
 	})
 
-	// Somebody who signed up with a password, never confirmed, and now arrives
-	// through a provider. Two things have to be true: the two accounts are one
-	// person, and the address counts as confirmed from here on — the provider
-	// checked it, and that is the same evidence a link is allowed on.
-	t.Run("a password account is linked, and its address is now verified", func(t *testing.T) {
+	// Somebody rig has seen but who never finished — they asked for a code and
+	// never used it — arriving through a provider instead. Two things have to be
+	// true: the two are one person, and the address counts as confirmed from
+	// here on, because the provider checked it and that is the same evidence a
+	// code is allowed on.
+	t.Run("an existing identity is linked, and its address is now verified", func(t *testing.T) {
 		ui := newBrowser(t)
 
 		address := "linus-" + uuid.NewString()[:8] + "@example.com"
-		ui.post(t, "/ui/register", url.Values{
-			"name": {"Linus"}, "email": {address},
-			"password": {"linus picked this one"},
-		})
-		ui.post(t, "/ui/logout", url.Values{})
+		// The request creates the person and nothing else. Not typing the code
+		// back is what leaves the address unconfirmed, which is the state this
+		// test needs and the one a code sign-in would have removed.
+		ui.post(t, "/ui/code", url.Values{"email": {address}})
 
 		var before *time.Time
 		if err := ui.pool.QueryRow(context.Background(),
@@ -666,11 +729,7 @@ func TestSigningInWithAProvider(t *testing.T) {
 		ui := newBrowser(t)
 
 		address := "mallory-" + uuid.NewString()[:8] + "@example.com"
-		ui.post(t, "/ui/register", url.Values{
-			"name": {"Mallory"}, "email": {address},
-			"password": {"mallory picked this one"},
-		})
-		ui.post(t, "/ui/logout", url.Values{})
+		ui.post(t, "/ui/code", url.Values{"email": {address}})
 
 		page := ui.signInWithProvider(t, consent{
 			subject: "an-attacker-" + uuid.NewString()[:8],
@@ -792,17 +851,13 @@ func hiddenValue(page, name string) (string, bool) {
 	return "", false
 }
 
-// The four-step flow, through the interface: create an account, look at where you
-// could go, join or make a tenant, and be in it.
+// The four-step flow, through the interface: sign in, look at where you could
+// go, join or make a tenant, and be in it.
 func TestTheFlowThroughThePicker(t *testing.T) {
-	t.Run("registering lands in the picker", func(t *testing.T) {
+	t.Run("a newcomer lands in the picker", func(t *testing.T) {
 		ui := newBrowser(t)
 		address := "grace-" + uuid.NewString()[:8] + "@example.com"
-		page := ui.post(t, "/ui/register", url.Values{
-			"name":     {"Grace"},
-			"email":    {address},
-			"password": {"grace picked this one"},
-		})
+		page := ui.signIn(t, address)
 
 		if !strings.Contains(page, "pick a tenant or make one") {
 			t.Fatalf("expected the flash:\n%s", excerpt(page))
@@ -822,10 +877,7 @@ func TestTheFlowThroughThePicker(t *testing.T) {
 
 	t.Run("making a tenant leaves it", func(t *testing.T) {
 		ui := newBrowser(t)
-		ui.post(t, "/ui/register", url.Values{
-			"name": {"Hopper"}, "email": {"hopper-" + uuid.NewString()[:8] + "@example.com"},
-			"password": {"hopper picked this one"},
-		})
+		ui.signIn(t, "hopper-"+uuid.NewString()[:8]+"@example.com")
 
 		page := ui.post(t, "/ui/tenants", url.Values{"tenantName": {"Hoppers"}})
 		if !strings.Contains(page, "tenant created") {
@@ -846,24 +898,18 @@ func TestTheFlowThroughThePicker(t *testing.T) {
 	// The case the old 403 made impossible, and the reason for all of this: an
 	// account here, no tenant, and an invitation waiting.
 	t.Run("joining one you were invited to", func(t *testing.T) {
-		// Registered first, so they have a password of their own. Somebody invited
-		// before they ever signed up takes the emailed link instead, which is the
+		// Signed in first, so they are somebody already. Somebody invited before
+		// they had ever been here takes the emailed link instead, which is the
 		// other door and is tested above.
 		joiner := newBrowser(t)
 		guest := "linus-" + uuid.NewString()[:8] + "@example.com"
-		joiner.post(t, "/ui/register", url.Values{
-			"name": {"Linus"}, "email": {guest},
-			"password": {"linus picked this one"},
-		})
+		joiner.signIn(t, guest)
 
 		// An owner, elsewhere, who invites them.
 		owner := newBrowser(t)
 		space := "Acme " + uuid.NewString()[:8]
-		owner.post(t, "/ui/signup", url.Values{
-			"tenantName": {space}, "name": {"Ada"},
-			"email":    {"ada-" + uuid.NewString()[:8] + "@example.com"},
-			"password": {"ada picked this one"},
-		})
+		owner.signIn(t, "ada-"+uuid.NewString()[:8]+"@example.com")
+		owner.post(t, "/ui/tenants", url.Values{"tenantName": {space}})
 		if page := owner.post(t, "/ui/invite", url.Values{
 			"email": {guest}, "name": {"Linus"}, "role": {"Basic"},
 		}); !strings.Contains(page, "invited") {

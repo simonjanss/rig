@@ -43,34 +43,6 @@ func (h *Handler) identity(r *http.Request) (*session.Identity, error) {
 	return h.cfg.Identities.Verify(r.Context(), presented)
 }
 
-// register creates a person with no tenant.
-//
-// Mounted only when the application allowed it. Whether a stranger may create an
-// account is the same kind of decision as whether they may create a tenant:
-// a product with an invite-only front door and one with public sign-up are both
-// ordinary, and they need different code.
-func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
-	var in authwire.RegisterRequest
-	if err := decode(r, &in); err != nil {
-		h.fail(w, r, err)
-		return
-	}
-
-	res, err := h.cfg.Accounts.Register(r.Context(), account.RegisterInput{
-		EmailAddress: in.EmailAddress,
-		DisplayName:  in.DisplayName,
-		Password:     in.Password,
-		Client:       clientOf(in.Client),
-		IPAddress:    h.addrString(r),
-		UserAgent:    r.UserAgent(),
-	})
-	if err != nil {
-		h.fail(w, r, err)
-		return
-	}
-	httpx.WriteJSON(w, http.StatusCreated, signInOf(res))
-}
-
 // myInvitations lists the invitations waiting for the caller, in every tenant.
 //
 // The other side of [Handler.listInvitations], which is an administrator looking
@@ -98,7 +70,8 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) {
 	for _, i := range invites {
 		out = append(out, authwire.InvitationToMeView{
 			ID: i.ID, TenantID: i.TenantID, TenantName: i.TenantName,
-			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
+			Role: string(i.Role), InvitedBy: i.InvitedByName,
+			CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.InvitationToMeView]{Data: out})

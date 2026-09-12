@@ -10,13 +10,32 @@ import (
 	"github.com/google/uuid"
 )
 
+var _ Store = (*MemoryStore)(nil)
+
 // MemoryStore is an in-process Store, for tests.
 type MemoryStore struct {
 	mu            sync.Mutex
 	identities    map[uuid.UUID]*Identity
 	accounts      map[uuid.UUID]*Account
-	credentials   map[uuid.UUID]*Credential // by identity
 	verifications map[uuid.UUID]*Verification
+
+	// depth is how many InTx calls are open, which is what
+	// [MemoryStore.InTransaction] reports.
+	//
+	// The real store's InTx holds a pool connection, so anything slow inside one
+	// — a Notifier calling somebody else's server — is a connection held for as
+	// long as that takes. Counting it here is how a test can say "not from
+	// inside a transaction" about something no assertion could otherwise see.
+	depth int
+
+	// Now is the clock the expiry filters read, so that a test advancing its own
+	// clock sees invitations expire the way Postgres would. Unset means
+	// time.Now.
+	//
+	// The real store puts `expires_at > now()` in SQL; this double used to leave
+	// it out entirely, which made it disagree with Postgres about a property
+	// under test — the thing accountOrder below exists to avoid.
+	Now func() time.Time
 
 	// accountOrder is the order accounts were added, which stands in for
 	// created_at.
@@ -108,7 +127,6 @@ func NewMemoryStore() *MemoryStore {
 	return &MemoryStore{
 		identities:    make(map[uuid.UUID]*Identity),
 		accounts:      make(map[uuid.UUID]*Account),
-		credentials:   make(map[uuid.UUID]*Credential),
 		verifications: make(map[uuid.UUID]*Verification),
 	}
 }
@@ -293,33 +311,33 @@ func (s *MemoryStore) MarkIdentityVerified(_ context.Context, identityID uuid.UU
 	return nil
 }
 
-// Credential implements [Store].
-func (s *MemoryStore) Credential(_ context.Context, identityID uuid.UUID) (*Credential, error) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	c, ok := s.credentials[identityID]
-	if !ok {
-		return nil, nil
-	}
-	copied := *c
-	return &copied, nil
-}
-
-// SaveCredential implements [Store].
-func (s *MemoryStore) SaveCredential(_ context.Context, c *Credential) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	copied := *c
-	s.credentials[c.IdentityID] = &copied
-	return nil
-}
-
 // CreateVerification implements [Store].
+//
+// It enforces the one unique index this table has that a caller can trip over:
+// one live invitation per person per tenant. Live is not consumed and not
+// revoked, and — like the index — says nothing about expiry, which is the whole
+// point of enforcing it here. A caller that clears the slot by a lookup which
+// hides expired rows passes against a double that does not check and fails
+// against Postgres, which is exactly the kind of disagreement this store is
+// written to avoid.
 func (s *MemoryStore) CreateVerification(_ context.Context, v *Verification) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if v.Kind == KindInvitation && v.InvitedToTenantID != nil {
+		for _, other := range s.verifications {
+			if other.Kind != KindInvitation || other.ConsumedAt != nil || other.RevokedAt != nil {
+				continue
+			}
+			if other.IdentityID != v.IdentityID || other.InvitedToTenantID == nil ||
+				*other.InvitedToTenantID != *v.InvitedToTenantID {
+				continue
+			}
+			return fmt.Errorf(
+				"account: an invitation into tenant %s is already live for identity %s",
+				*v.InvitedToTenantID, v.IdentityID)
+		}
+	}
 
 	copied := *v
 	s.verifications[v.ID] = &copied
@@ -331,26 +349,10 @@ func (s *MemoryStore) PendingInvitations(_ context.Context, tenantID uuid.UUID) 
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	var out []Invitation
-	for _, v := range s.verifications {
-		if v.Kind != KindInvitation || v.InvitedToTenantID == nil || *v.InvitedToTenantID != tenantID {
-			continue
-		}
-		if v.ConsumedAt != nil || v.RevokedAt != nil {
-			continue
-		}
-		ident, ok := s.identities[v.IdentityID]
-		if !ok {
-			continue
-		}
-		for _, a := range s.accounts {
-			if a.TenantID != tenantID || a.IdentityID == nil || *a.IdentityID != v.IdentityID {
-				continue
-			}
-			out = append(out, s.invitationOf(v, ident, a))
-		}
-	}
-	return out, nil
+	return s.invitations(func(v *Verification) bool {
+		return v.InvitedToTenantID != nil && *v.InvitedToTenantID == tenantID &&
+			s.now().Before(v.ExpiresAt)
+	}), nil
 }
 
 // InvitationsForIdentity implements [Store].
@@ -358,42 +360,162 @@ func (s *MemoryStore) InvitationsForIdentity(_ context.Context, identityID uuid.
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	ident, ok := s.identities[identityID]
-	if !ok {
-		return nil, nil
-	}
-
-	var out []Invitation
-	for _, v := range s.verifications {
-		if v.Kind != KindInvitation || v.IdentityID != identityID {
-			continue
-		}
-		if v.ConsumedAt != nil || v.RevokedAt != nil || v.InvitedToTenantID == nil {
-			continue
-		}
-		s.eachAccount(func(a *Account) {
-			if a.TenantID != *v.InvitedToTenantID || a.IdentityID == nil || *a.IdentityID != identityID {
-				return
-			}
-			out = append(out, s.invitationOf(v, ident, a))
-		})
-	}
-	return out, nil
+	return s.invitations(func(v *Verification) bool {
+		return v.IdentityID == identityID && s.now().Before(v.ExpiresAt)
+	}), nil
 }
 
-// invitationOf assembles the view both invitation queries answer with. Callers
+// InvitationByID implements [Store].
+func (s *MemoryStore) InvitationByID(_ context.Context, id uuid.UUID) (*Invitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	// No expiry filter, matching the real store: the service compares against
+	// its own clock, and two places deciding what "expired" means is how the
+	// double and the database come apart.
+	out := s.invitations(func(v *Verification) bool { return v.ID == id })
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
+}
+
+// InvitationByToken implements [Store].
+func (s *MemoryStore) InvitationByToken(_ context.Context, hash []byte) (*Invitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := s.invitations(func(v *Verification) bool {
+		return len(v.TokenHash) > 0 && bytes.Equal(v.TokenHash, hash)
+	})
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
+}
+
+// InvitationSlot implements [Store].
+//
+// No expiry filter, standing in for a unique index that has none: an expired
+// invitation still holds the slot, so hiding it here would be hiding the row
+// the real store is about to refuse a second invitation over.
+func (s *MemoryStore) InvitationSlot(
+	_ context.Context, tenantID, identityID uuid.UUID,
+) (*Invitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := s.invitations(func(v *Verification) bool {
+		return *v.InvitedToTenantID == tenantID && v.IdentityID == identityID
+	})
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
+}
+
+// invitations is the live invitations matching a predicate. Callers hold the
+// lock.
+//
+// "Live" is not consumed and not revoked; whether it has expired is up to the
+// predicate, because the two by-identifier lookups deliberately answer an
+// expired one and let the service decide.
+func (s *MemoryStore) invitations(match func(*Verification) bool) []Invitation {
+	var out []Invitation
+	for _, v := range s.verifications {
+		if v.Kind != KindInvitation || v.ConsumedAt != nil || v.RevokedAt != nil {
+			continue
+		}
+		if v.InvitedToTenantID == nil || v.InvitedRole == nil || !match(v) {
+			continue
+		}
+		ident, ok := s.identities[v.IdentityID]
+		if !ok {
+			continue
+		}
+		out = append(out, s.invitationOf(v, ident))
+	}
+	return out
+}
+
+// invitationOf assembles the view the invitation queries answer with. Callers
 // hold the lock.
-func (s *MemoryStore) invitationOf(v *Verification, ident *Identity, a *Account) Invitation {
-	name, ok := s.TenantNames[a.TenantID]
+func (s *MemoryStore) invitationOf(v *Verification, ident *Identity) Invitation {
+	tenantID := *v.InvitedToTenantID
+	name, ok := s.TenantNames[tenantID]
 	if !ok {
-		name = a.TenantID.String()
+		name = tenantID.String()
 	}
+
+	var by string
+	if v.InvitedByAccountID != nil {
+		if a, ok := s.accounts[*v.InvitedByAccountID]; ok {
+			by = a.DisplayName
+		}
+	}
+
 	return Invitation{
-		ID: v.ID, IdentityID: v.IdentityID, AccountID: a.ID,
-		TenantID: a.TenantID, TenantName: name,
-		EmailAddress: ident.EmailAddress, DisplayName: ident.DisplayName,
-		Role: a.Role, CreatedAt: v.CreatedAt, ExpiresAt: v.ExpiresAt,
+		ID: v.ID, IdentityID: v.IdentityID,
+		TenantID: tenantID, TenantName: name,
+		EmailAddress:       ident.EmailAddress,
+		DisplayName:        orName(v.InvitedDisplayName, ident.DisplayName),
+		Role:               *v.InvitedRole,
+		InvitedByAccountID: v.InvitedByAccountID,
+		InvitedByName:      by,
+		CreatedAt:          v.CreatedAt, ExpiresAt: v.ExpiresAt,
 	}
+}
+
+// LiveVerification implements [Store].
+func (s *MemoryStore) LiveVerification(
+	_ context.Context, identityID uuid.UUID, kind VerificationKind,
+) (*Verification, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	var newest *Verification
+	for _, v := range s.verifications {
+		if v.IdentityID != identityID || v.Kind != kind || !v.Usable(s.now()) {
+			continue
+		}
+		if newest == nil || v.CreatedAt.After(newest.CreatedAt) {
+			newest = v
+		}
+	}
+	if newest == nil {
+		return nil, nil
+	}
+	copied := *newest
+	return &copied, nil
+}
+
+// ChargeVerificationAttempt implements [Store].
+func (s *MemoryStore) ChargeVerificationAttempt(
+	_ context.Context, id uuid.UUID, max int, at time.Time,
+) (int, bool, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	v, ok := s.verifications[id]
+	if !ok || v.ConsumedAt != nil || v.RevokedAt != nil {
+		return 0, true, nil
+	}
+
+	v.Attempts++
+	if v.Attempts >= max {
+		when := at
+		v.RevokedAt = &when
+		return v.Attempts, true, nil
+	}
+	return v.Attempts, false, nil
+}
+
+// now is the clock the expiry filters read.
+func (s *MemoryStore) now() time.Time {
+	if s.Now != nil {
+		return s.Now()
+	}
+	return time.Now()
 }
 
 // RevokeVerification implements [Store].
@@ -408,19 +530,6 @@ func (s *MemoryStore) RevokeVerification(_ context.Context, id uuid.UUID, at tim
 	when := at
 	v.RevokedAt = &when
 	return true, nil
-}
-
-// SoftDeleteAccount implements [Store].
-func (s *MemoryStore) SoftDeleteAccount(_ context.Context, in DeleteAccountInput) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-
-	// Deleting for real, because the memory store has no lifecycle columns and
-	// what every caller checks is whether the account is still found.
-	if a, ok := s.accounts[in.AccountID]; ok && a.TenantID == in.TenantID {
-		delete(s.accounts, in.AccountID)
-	}
-	return nil
 }
 
 // VerificationByHash implements [Store].
@@ -465,8 +574,31 @@ func (s *MemoryStore) ConsumeVerification(_ context.Context, id uuid.UUID, at ti
 }
 
 // InTx implements [Store].
+//
+// Re-entrant, like the real one, and it counts: see [MemoryStore.InTransaction].
 func (s *MemoryStore) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	s.mu.Lock()
+	s.depth++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.depth--
+		s.mu.Unlock()
+	}()
 	return fn(ctx)
+}
+
+// InTransaction reports whether the caller is running inside [MemoryStore.InTx].
+//
+// It is for the assertion a Notifier makes about itself: the mail a flow sends
+// must go out after the transaction that wrote the row it is about, because the
+// real store would otherwise be holding a connection open across somebody
+// else's server.
+func (s *MemoryStore) InTransaction() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.depth > 0
 }
 
 // MemoryOutbox is an [Outbox] over a map, for tests and for development.
@@ -693,6 +825,25 @@ func (s *MemoryStore) CountVerifications() int {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	return len(s.verifications)
+}
+
+// Forget removes an account outright.
+//
+// The real store soft-deletes, and what every caller here checks is whether the
+// account is still found — which is the same question either way. It stands in
+// for the ways an account can stop existing: somebody removed from a tenant, or
+// a tenant closed.
+func (s *MemoryStore) Forget(accountID uuid.UUID) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	delete(s.accounts, accountID)
+	for i, id := range s.accountOrder {
+		if id == accountID {
+			s.accountOrder = append(s.accountOrder[:i], s.accountOrder[i+1:]...)
+			break
+		}
+	}
 }
 
 // DeactivateIdentity switches somebody off, for the test that says a deactivated

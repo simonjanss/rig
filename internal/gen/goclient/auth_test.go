@@ -42,8 +42,8 @@ func TestTheProfileCarriesTheProjectsOwnLifetimes(t *testing.T) {
 		"RotationLeeway: 45 * time.Second",
 		"IdentityTTL: 20 * time.Minute",
 		"CacheTTL: 45 * time.Second",
-		// The project allows both, so the client knows the routes are there.
-		"HasRegistration: true",
+		// The project has both, so the client knows the routes are there.
+		"HasEmailCode: true",
 		"HasTenantCreation: true",
 		// And how a sign-in names its tenant, since that is the one call that
 		// cannot read it from a credential.

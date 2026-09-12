@@ -167,7 +167,7 @@ func (e *emitter) authProfile(b *tsbuf.Buf, profile *ir.Auth) {
 	// Which routes exist follows from the configuration, the same way the
 	// server's own mounting does. A client that asked for one that is not there
 	// would get a 404 saying only that the URL is wrong.
-	b.L("hasRegistration: %t,", profile.AllowRegistration)
+	b.L("hasEmailCode: %t,", profile.EmailCode.Enabled)
 	b.L("hasTenantCreation: %t,", profile.AllowTenantCreation)
 
 	// Hardcoded for the same reason the Go client hardcodes them: the server

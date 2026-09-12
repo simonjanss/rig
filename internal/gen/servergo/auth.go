@@ -320,16 +320,26 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 		b.NL()
 	}
 
-	if a.AllowRegistration {
-		b.Comment("OnRegistered runs inside the transaction that creates a " +
-			"self-registered identity, and an error rolls the sign-up back. The " +
-			"ordinary body is accounts.Provision with Invite set, so a newcomer " +
-			"lands in the picker with an invitation already waiting. Nil registers " +
-			"the person and nothing else.")
+	if a.EmailCode.Enabled && a.EmailCode.AllowProvisioning {
+		b.Comment("OnRegistered runs inside the transaction that creates somebody " +
+			"rig has never seen — asking for a sign-in code with a new address — and " +
+			"an error rolls the whole thing back. The ordinary body is " +
+			"accounts.Provision into a starter tenant, or accounts.Invite to leave " +
+			"one waiting in the picker they land in. Nil creates the person and " +
+			"nothing else.")
 		b.L("OnRegistered func(%s.Context, *%s.Service, %s.Registered) error",
 			b.Import("context"), account, account)
 		b.NL()
 	}
+
+	b.Comment("OnJoined runs inside the transaction that accepts an invitation, " +
+		"after the account exists and before the session is issued, and an error " +
+		"rolls the acceptance back.\n\n" +
+		"It is where a new member's roles and rows are seeded. Provision is called " +
+		"by your own code, so what else a new member needs is your next line; " +
+		"accepting an invitation is called by rig's handler, and this is that line.")
+	b.L("OnJoined func(%s.Context, %s.Joined) error", b.Import("context"), account)
+	b.NL()
 
 	if a.Tenant.Uses(ir.TenantFromHook) {
 		uuidPkg := b.Import("github.com/google/uuid")
@@ -728,7 +738,6 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		authPkg  = b.Import(authModule)
 		poolPkg  = b.Import("github.com/jackc/pgx/v5/pgxpool")
 		errsPkg  = b.Import("errors")
-		pwPkg    = b.Import(authModule + "/password")
 		httpPkg  = b.Import("net/http")
 		fail     = "return " + authPkg + ".Config{}, "
 		hasProxy = len(a.TrustedProxies) > 0
@@ -768,6 +777,16 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 		b.L("if h.Notifier == nil {")
 		b.L("%s%s.New(%q)", fail, errsPkg,
 			e.failure("no Notifier, but auth.require_verified_email is set, so nobody could verify an address"))
+		b.L("}")
+	}
+	if a.EmailCode.Enabled {
+		b.Comment("A code nobody sends is a door nobody can open, and with no provider " +
+			"configured it is the only door. Refused here rather than at the first " +
+			"sign-in, because there is nothing in a running system that would point " +
+			"at the configuration.")
+		b.L("if h.Notifier == nil {")
+		b.L("%s%s.New(%q)", fail, errsPkg,
+			e.failure("no Notifier, but auth.email_code.enabled is set, so every code would be minted and then dropped"))
 		b.L("}")
 	}
 	b.NL()
@@ -816,24 +835,26 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 
 	e.cacheConfig(b)
 
-	b.L("Policy: %s.Policy{MinLength: %d, MaxLength: %d},",
-		pwPkg, a.Password.MinLength, a.Password.MaxLength)
-	if a.Password.BreachCheck {
-		b.L("// Only a hash prefix is sent, and the check fails open: a third party's")
-		b.L("// outage must not stop somebody changing their password.")
-		b.L("BreachChecker: %s.NewHIBP(),", pwPkg)
+	if c := a.EmailCode; c.Enabled {
+		b.L("EmailCode: %s.EmailCodeOptions{", authPkg)
+		b.L("Enabled: true,")
+		b.L("Length: %d,", c.Length)
+		b.L("TTL: %s,", genutil.GoDuration(b, c.TTL))
+		b.L("MaxAttempts: %d,", c.MaxAttempts)
+		b.L("AllowProvisioning: %t,", c.AllowProvisioning)
+		b.L("},")
+		b.NL()
 	}
-	b.NL()
 
-	b.L("AllowRegistration: %t,", a.AllowRegistration)
 	b.L("AllowTenantCreation: %t,", a.AllowTenantCreation)
 	b.L("RequireVerifiedEmail: %t,", a.RequireVerifiedEmail)
 	if a.AllowTenantCreation {
 		b.L("Tenants: h.Tenants,")
 	}
-	if a.AllowRegistration {
+	if a.EmailCode.Enabled && a.EmailCode.AllowProvisioning {
 		b.L("OnRegistered: h.OnRegistered,")
 	}
+	b.L("OnJoined: h.OnJoined,")
 	b.NL()
 
 	b.L("Grants: h.Grants,")
@@ -1259,10 +1280,12 @@ func (e *authEmitter) limitsFunc(b *gobuf.Buf) {
 	}{
 		{"LoginByEmail", l.LoginByEmail},
 		{"LoginByIP", l.LoginByIP},
-		{"PasswordReset", l.PasswordReset},
+		{"EmailCodeRequest", l.EmailCodeRequest},
+		{"EmailCodeByIP", l.EmailCodeByIP},
 		{"VerificationResend", l.VerificationResend},
 		{"Refresh", l.Refresh},
 		{"APIKeyFailures", l.APIKeyFailures},
+		{"InvitationPreview", l.InvitationPreview},
 	} {
 		b.L("d.%s.Max, d.%s.Window = %d, %s",
 			pair.field, pair.field, pair.limit.Max, genutil.GoDuration(b, pair.limit.Window))

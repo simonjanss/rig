@@ -21,76 +21,83 @@ import (
 // below goes through that route rather than through the box directly — because
 // what the front end can walk is the thing worth asserting on.
 
-// A password reset, end to end, with the outbox standing in for a mailbox.
-func TestAPasswordResetThroughTheOutbox(t *testing.T) {
+// A sign-in code, end to end, with the outbox standing in for a mailbox.
+func TestASignInCodeThroughTheOutbox(t *testing.T) {
 	api := newServer(t)
 	api.seed(t)
 
-	// The token is minted for an identity, before anybody knows which tenant
-	// it is for — an address can belong to accounts in several — so reading the
-	// box needs a session even though the message that comes back has no tenant
-	// on it.
+	// The code is minted for an identity, before anybody knows which tenant it
+	// is for — an address can belong to accounts in several — so reading the box
+	// needs a session even though the message that comes back has no tenant on
+	// it. The demo route beside it is the way in for somebody who has no
+	// session yet, which is what this suite uses for the sign-in itself.
 	reader := api.login(t, app.SeedEmail2)
 
 	const nobody = "nobody@linearlite.dev"
 
-	// Always 202, and the endpoint answers the same for an address nobody has:
+	// Always 204, and the endpoint answers the same for an address nobody has:
 	// anything else would tell a stranger which addresses have accounts.
 	for _, address := range []string{app.SeedEmail, nobody} {
 		res := api.do(t, request{
-			method: http.MethodPost, path: "/auth/password/reset",
+			method: http.MethodPost, path: "/auth/email-code",
 			body: map[string]any{"emailAddress": address},
 		})
-		if res.status != http.StatusAccepted {
-			t.Fatalf("reset for %s: %d %s, want 202", address, res.status, res.body)
+		if res.status != http.StatusNoContent {
+			t.Fatalf("a code for %s: %d %s, want 204", address, res.status, res.body)
 		}
 	}
 
-	// One link, not two. The answers were identical; what differs is that only
-	// one of them had anywhere to send mail — which is the whole shape of the
-	// endpoint's refusal to confirm an address.
-	var token string
+	// Two codes, and that is the point rather than a leak. This example sets
+	// allow_provisioning, so an address rig has never seen gets a person and a
+	// code of its own — and the caller cannot tell the two cases apart, because
+	// both answered 204 and neither mail went to them.
+	var code string
+	var reached int
 	for _, m := range api.outbox(t, reader) {
-		switch {
-		case m.Kind == outbox.KindReset && m.To == app.SeedEmail:
-			token = m.Token
-		case m.To == nobody:
-			t.Error("an address with no account must not produce mail")
+		if m.Kind != outbox.KindEmailCode {
+			continue
+		}
+		switch m.To {
+		case app.SeedEmail:
+			code = m.Token
+			reached++
+		case nobody:
+			reached++
 		}
 	}
-	if token == "" {
-		t.Fatal("the reset link should be in the outbox")
+	if code == "" {
+		t.Fatal("the code should be in the outbox")
+	}
+	if reached != 2 {
+		t.Errorf("%d codes went out, want one per address", reached)
 	}
 
-	const newPassword = "a whole new correct horse"
+	// The person the second one created, which is what allow_provisioning
+	// means: asking for a code is how somebody arrives here.
+	var made int
+	if err := api.pool.QueryRow(context.Background(),
+		`SELECT count(*) FROM rig_identity WHERE lower(email_address) = lower($1)`,
+		nobody).Scan(&made); err != nil {
+		t.Fatal(err)
+	}
+	if made != 1 {
+		t.Errorf("%d identities for the new address, want 1", made)
+	}
 
 	if res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/password/reset/confirm",
-		body: map[string]any{"token": token, "newPassword": newPassword},
-	}); res.status != http.StatusNoContent && res.status != http.StatusOK {
-		t.Fatalf("confirm: %d %s", res.status, res.body)
+		method: http.MethodPost, path: "/auth/email-code/verify",
+		body: map[string]any{"emailAddress": app.SeedEmail, "code": code},
+	}); res.status != http.StatusOK {
+		t.Fatalf("sign in with the mailed code: %d %s", res.status, res.body)
 	}
 
-	// The link is spent. Sending it again is refused rather than ignored,
+	// The code is spent. Offering it again is refused rather than ignored,
 	// which is what makes it single-use rather than merely short-lived.
 	if res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/password/reset/confirm",
-		body: map[string]any{"token": token, "newPassword": newPassword},
+		method: http.MethodPost, path: "/auth/email-code/verify",
+		body: map[string]any{"emailAddress": app.SeedEmail, "code": code},
 	}); res.status < 400 {
-		t.Errorf("a spent link should be refused: %d %s", res.status, res.body)
-	}
-
-	if res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": app.SeedEmail, "password": newPassword},
-	}); res.status != http.StatusOK {
-		t.Fatalf("sign in with the new password: %d %s", res.status, res.body)
-	}
-	if res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/login",
-		body: map[string]any{"emailAddress": app.SeedEmail, "password": app.SeedPassword},
-	}); res.status == http.StatusOK {
-		t.Error("the old password should no longer work")
+		t.Errorf("a spent code should be refused: %d %s", res.status, res.body)
 	}
 }
 
@@ -106,10 +113,9 @@ func TestAnInvitationLandsInTheOutbox(t *testing.T) {
 	invited := "newcomer-" + uuid.NewString() + "@linearlite.dev"
 
 	res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/accounts", token: owner,
+		method: http.MethodPost, path: "/auth/invitations", token: owner,
 		body: map[string]any{
-			"emailAddress": invited, "displayName": "Newcomer",
-			"role": "Basic", "invite": true,
+			"emailAddress": invited, "displayName": "Newcomer", "role": "Basic",
 		},
 	})
 	if res.status != http.StatusCreated {
@@ -126,14 +132,14 @@ func TestAnInvitationLandsInTheOutbox(t *testing.T) {
 		t.Error("the invitation link should be in the outbox")
 	}
 
-	// The permission model, not a special case: provisioning is administrative,
-	// and the Basic role the seed gives alex does not hold it.
+	// The permission model, not a special case: inviting is administrative, and
+	// the Basic role the seed gives alex does not hold it.
 	member := api.login(t, app.SeedEmail2)
 	if res := api.do(t, request{
-		method: http.MethodPost, path: "/auth/accounts", token: member,
+		method: http.MethodPost, path: "/auth/invitations", token: member,
 		body: map[string]any{
 			"emailAddress": "another-" + uuid.NewString() + "@linearlite.dev",
-			"displayName":  "Another", "invite": true,
+			"displayName":  "Another",
 		},
 	}); res.status != http.StatusForbidden {
 		t.Errorf("a member inviting: %d %s, want 403", res.status, res.body)

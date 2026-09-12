@@ -180,9 +180,21 @@ func New(ctx context.Context, cfg Config) (api.Parts, error) {
 			OnCreated: authz.SeedFor(append(api.PermissionKeys(), authz.AuthKeys()...)),
 		},
 
-		// The reason requirement-two of this example works: registering leaves
-		// an invitation to the demo tenant waiting in the picker.
+		// The reason requirement-two of this example works: a newcomer asking
+		// for a sign-in code leaves an invitation to the demo tenant waiting in
+		// their picker.
 		OnRegistered: autoInvite(),
+
+		// And the role, at the moment accepting creates the account to attach
+		// it to. An invitation accepted onto a board you cannot read would look
+		// exactly like a bug.
+		OnJoined: func(ctx context.Context, in account.Joined) error {
+			tx, ok := dbx.Tx(ctx)
+			if !ok {
+				return errors.New("linearlite: OnJoined expected a transaction")
+			}
+			return authz.AttachRole(ctx, tx, in.TenantID, in.AccountID, string(in.Role))
+		},
 	})
 	if err != nil {
 		return api.Parts{}, err
@@ -361,26 +373,25 @@ func autoInvite() func(context.Context, *account.Service, account.Registered) er
 			return nil
 		}
 
-		acct, err := accounts.Provision(ctx, account.ProvisionInput{
+		// Invite rather than Provision, and the difference is the whole flow:
+		// nothing is created in the tenant here. What the newcomer gets is an
+		// invitation in their picker, and accepting it is what makes them a
+		// member — so somebody who asks for a code and never types it back
+		// leaves the demo board exactly as it was.
+		if _, err := accounts.Invite(ctx, account.InviteInput{
 			TenantID:     tenantID,
 			EmailAddress: in.EmailAddress,
 			DisplayName:  in.DisplayName,
-			// The invitation is the point: it is what the picker lists, and
-			// accepting it is what turns the identity session into a tenant one.
-			Invite: true,
-		})
-		if err != nil {
+			Role:         account.RoleBasic,
+		}); err != nil {
 			return err
 		}
 
-		// The role in the same transaction as the account, for the same reason
-		// tenant creation seeds roles in its own: an invitation accepted onto a
-		// board you cannot read would look exactly like a bug.
-		if err := authz.SeedRoles(ctx, tx, tenantID,
-			append(api.PermissionKeys(), authz.AuthKeys()...)); err != nil {
-			return err
-		}
-		return authz.AttachRole(ctx, tx, tenantID, acct.ID, string(account.RoleBasic))
+		// The roles still go in this transaction, because they belong to the
+		// tenant rather than to the newcomer. Attaching one is OnJoined's, at
+		// the moment there is an account to attach it to.
+		return authz.SeedRoles(ctx, tx, tenantID,
+			append(api.PermissionKeys(), authz.AuthKeys()...))
 	}
 }
 

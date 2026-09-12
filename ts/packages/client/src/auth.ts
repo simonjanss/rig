@@ -4,20 +4,20 @@ import type {
     APIKeyView,
     AuthLogEntryView,
     AuthPage,
-    ChangePasswordRequest,
     CreateKeyRequest,
     CreateKeyResponse,
     CreateTenantRequest,
+    InvitationPreview,
     InvitationToMeView,
     InvitationView,
+    InviteRequest,
     List,
-    LoginRequest,
     ProvisionRequest,
-    RegisterRequest,
     SessionView,
     SignInResponse,
     TenantView,
     TokenPair,
+    VerifyEmailCodeRequest,
 } from "./authwire.js";
 import type { Credential } from "./credential.js";
 import type { AuthProfile, Runtime } from "./runtime.js";
@@ -116,7 +116,7 @@ export class Auth {
      * Names the tenant a call is for, in the header this project reads.
      *
      * Only consulted where the tenant cannot be known some other way — a
-     * sign-in, a password reset. Once there is a session the tenant comes from
+     * sign-in, a code request. Once there is a session the tenant comes from
      * the token.
      *
      * ```ts
@@ -174,34 +174,73 @@ export class Auth {
     // ---- Signing in and out ------------------------------------------------
 
     /**
-     * Signs in and installs the session, which is what almost every caller
-     * wants.
+     * Asks for a sign-in code to be mailed.
      *
-     * {@link Auth.login} is the same call without the installation, for a
-     * program that holds several credentials at once and does not want this one
-     * to become the client's.
+     * Always accepted, whether or not the address is known: an endpoint that
+     * answered differently would be one that tells a stranger which addresses
+     * have accounts. What it does report is a rate-limit refusal, which is
+     * about how often you have asked rather than about the address.
+     */
+    async requestEmailCode(
+        emailAddress: string,
+        opts: CallOptions = {},
+    ): Promise<void> {
+        this.mounted(
+            this.profile.hasEmailCode,
+            `POST ${this.path("/email-code")}`,
+            "set auth.email_code.enabled in rig.yaml to open it",
+        );
+        return sendNoContent(
+            this.rt,
+            {
+                name: "authRequestEmailCode",
+                method: "POST",
+                root: true,
+                path: this.path("/email-code"),
+                body: { emailAddress },
+            },
+            this.anon(opts),
+        );
+    }
+
+    /**
+     * Types a mailed code back and installs the session, which is what almost
+     * every caller wants.
+     *
+     * {@link Auth.verifyEmailCode} is the same call without the installation,
+     * for a program that holds several credentials at once and does not want
+     * this one to become the client's.
+     *
+     * Somebody who belongs to no tenant comes back with an identity token and
+     * no pair — not a failure, but the tenant picker. Check `accessToken`
+     * before assuming there is one.
      */
     async signIn(
-        input: LoginRequest,
+        input: VerifyEmailCodeRequest,
         opts: CallOptions = {},
     ): Promise<SignInResponse> {
-        const res = await this.login(input, opts);
+        const res = await this.verifyEmailCode(input, opts);
         this.install(res);
         return res;
     }
 
-    /** Signs in and hands back the answer without installing it. */
-    login(
-        input: LoginRequest,
+    /** Signs in with a code and hands back the answer without installing it. */
+    async verifyEmailCode(
+        input: VerifyEmailCodeRequest,
         opts: CallOptions = {},
     ): Promise<SignInResponse> {
+        this.mounted(
+            this.profile.hasEmailCode,
+            `POST ${this.path("/email-code/verify")}`,
+            "set auth.email_code.enabled in rig.yaml to open it",
+        );
         return send<SignInResponse>(
             this.rt,
             {
-                name: "authLogin",
+                name: "authVerifyEmailCode",
                 method: "POST",
                 root: true,
-                path: this.path("/login"),
+                path: this.path("/email-code/verify"),
                 body: input,
             },
             this.anon(opts),
@@ -252,36 +291,13 @@ export class Auth {
         );
     }
 
-    /** Creates an account that belongs to no tenant yet, and signs it in. */
-    async register(
-        input: RegisterRequest,
-        opts: CallOptions = {},
-    ): Promise<SignInResponse> {
-        this.mounted(
-            this.profile.hasRegistration,
-            `POST ${this.path("/register")}`,
-            "set auth.allow_registration in rig.yaml to open it",
-        );
-        const res = await send<SignInResponse>(
-            this.rt,
-            {
-                name: "authRegister",
-                method: "POST",
-                root: true,
-                path: this.path("/register"),
-                body: input,
-            },
-            this.anon(opts),
-        );
-        this.install(res);
-        return res;
-    }
-
-    // ---- Accounts and passwords --------------------------------------------
+    // ---- Accounts and addresses --------------------------------------------
 
     /**
-     * Creates an account inside the caller's tenant, optionally inviting the
-     * person to set a password.
+     * Creates an account inside the caller's tenant, now.
+     *
+     * {@link Auth.invite} is the other reading and mails nothing: it creates no
+     * account at all, and accepting is what makes somebody a member.
      */
     provision(
         input: ProvisionRequest,
@@ -298,77 +314,6 @@ export class Auth {
             },
             opts,
         );
-    }
-
-    /**
-     * Asks for a reset link.
-     *
-     * Always accepted, whether or not the address is known: an endpoint that
-     * answered differently would be one that tells a stranger which addresses
-     * have accounts.
-     */
-    requestPasswordReset(
-        emailAddress: string,
-        opts: CallOptions = {},
-    ): Promise<void> {
-        return sendNoContent(
-            this.rt,
-            {
-                name: "authRequestPasswordReset",
-                method: "POST",
-                root: true,
-                path: this.path("/password/reset"),
-                body: { emailAddress },
-            },
-            this.anon(opts),
-        );
-    }
-
-    /** Redeems the link. The emailed token is the credential, for one use. */
-    confirmPasswordReset(
-        token: string,
-        newPassword: string,
-        opts: CallOptions = {},
-    ): Promise<void> {
-        return sendNoContent(
-            this.rt,
-            {
-                name: "authConfirmPasswordReset",
-                method: "POST",
-                root: true,
-                path: this.path("/password/reset/confirm"),
-                body: { token, newPassword },
-            },
-            this.anon(opts),
-        );
-    }
-
-    /**
-     * Changes the password of whoever is signed in.
-     *
-     * It answers with a fresh pair, because setting a password revokes every
-     * session the identity had — including this one. Adopting what comes back is
-     * what keeps the tab that did it signed in while every other tab is signed
-     * out, which is what somebody changing a password after a scare wants.
-     */
-    async changePassword(
-        input: ChangePasswordRequest,
-        opts: CallOptions = {},
-    ): Promise<TokenPair> {
-        const held = this.held();
-        const pair = await send<TokenPair>(
-            this.rt,
-            {
-                name: "authChangePassword",
-                method: "POST",
-                root: true,
-                path: this.path("/password/change"),
-                body: input,
-            },
-            opts,
-        );
-        this.adopt(pair, held);
-        return pair;
     }
 
     /** Redeems an emailed verification token. */
@@ -567,6 +512,59 @@ export class Auth {
         );
         this.install(pair);
         return pair;
+    }
+
+    /**
+     * Asks an address to join the caller's tenant, and creates nothing in it.
+     *
+     * Whoever holds the credential this call is made with is recorded as the
+     * inviter, which is what a landing page shows somebody who has not signed
+     * in yet. There is no way to say it was somebody else.
+     */
+    invite(
+        input: InviteRequest,
+        opts: CallOptions = {},
+    ): Promise<InvitationView> {
+        return send<InvitationView>(
+            this.rt,
+            {
+                name: "authInvite",
+                method: "POST",
+                root: true,
+                path: this.path("/invitations"),
+                body: input,
+            },
+            opts,
+        );
+    }
+
+    /**
+     * Says what an invitation link is for, without spending it.
+     *
+     * Anonymous, and the point of it: this is what a landing page calls with
+     * the token out of its own URL, before anybody has signed in, so that it
+     * can say who invited you and where instead of showing a bare sign-in box.
+     *
+     * The address that comes back is masked. Every way the token can be wrong —
+     * not found, already used, withdrawn, expired — is the same 404.
+     */
+    previewInvitation(
+        token: string,
+        opts: CallOptions = {},
+    ): Promise<InvitationPreview> {
+        const query = new URLSearchParams();
+        setParam(query, "token", token);
+        return send<InvitationPreview>(
+            this.rt,
+            {
+                name: "authPreviewInvitation",
+                method: "GET",
+                root: true,
+                path: this.path("/invitations/preview"),
+                query,
+            },
+            this.anon(opts),
+        );
     }
 
     /** Invitations sent into this tenant and not yet accepted. */
@@ -851,9 +849,9 @@ export class Auth {
     /**
      * Hands a newly issued pair to the session already installed.
      *
-     * What a refresh, a tenant switch, a password change and an impersonation
-     * produce: the same person — or the same client — continuing, so a response
-     * that carried no refresh token keeps the one in hand.
+     * What a refresh, a tenant switch and an impersonation produce: the same
+     * person — or the same client — continuing, so a response that carried no
+     * refresh token keeps the one in hand.
      *
      * `held` is who that was when the call went out. A pair that arrives after
      * somebody else has signed in is dropped rather than handed over: it would

@@ -56,14 +56,23 @@ servers:
     url: http://localhost:8084
     description: This example, running on your machine.
 
-# The authentication foundation. Registration and tenant creation are both on,
-# because this example's front door is a sign-up form: a stranger registers,
-# lands in the picker, and finds an invitation to the seeded tenant already
-# waiting — the OnRegistered hook in main.go is what put it there.
+# The authentication foundation. This example's front door is an address and a
+# mailed code: a stranger types their address, `allow_provisioning` creates the
+# person, they type the code back, and they land in the picker with an
+# invitation to the seeded tenant already waiting — the OnRegistered hook in
+# app.go is what put it there.
 auth:
   enabled: true
-  allow_registration: true
+  email_code:
+    enabled: true
+    allow_provisioning: true
   allow_tenant_creation: true
+  # Five codes an hour per address is the default and the right number for a
+  # product. This is a demonstration and a suite that walks it, both of which
+  # sign in as the seeded pair far more often than a person would, so the one
+  # limit that costs is raised here and nothing else is.
+  limits:
+    email_code_request: {max: 200, window: 1h}
   # The people in a tenant, as an ordinary read-only resource. The board needs
   # names to put on assignees, and this is the documented way to get them: the
   # foundation table keeps its own authentication queries, and a generated

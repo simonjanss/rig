@@ -25,7 +25,6 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/oauth"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/serve"
@@ -130,11 +129,21 @@ type Hooks struct {
 	// tenant nobody can reach.
 	Tenants account.TenantOptions
 
-	// OnRegistered runs inside the transaction that creates a self-registered
-	// identity, and an error rolls the sign-up back. The ordinary body is
-	// accounts.Provision with Invite set, so a newcomer lands in the picker with
-	// an invitation already waiting. Nil registers the person and nothing else.
+	// OnRegistered runs inside the transaction that creates somebody rig has never
+	// seen — asking for a sign-in code with a new address — and an error rolls
+	// the whole thing back. The ordinary body is accounts.Provision into a starter
+	// tenant, or accounts.Invite to leave one waiting in the picker they land in.
+	// Nil creates the person and nothing else.
 	OnRegistered func(context.Context, *account.Service, account.Registered) error
+
+	// OnJoined runs inside the transaction that accepts an invitation, after the
+	// account exists and before the session is issued, and an error rolls the
+	// acceptance back.
+	//
+	// It is where a new member's roles and rows are seeded. Provision is called by
+	// your own code, so what else a new member needs is your next line; accepting
+	// an invitation is called by rig's handler, and this is that line.
+	OnJoined func(context.Context, account.Joined) error
 
 	// Tenant resolves which tenant a request is for, and is required because
 	// auth.tenant.from names the hook source. Answer uuid.Nil for a request that
@@ -373,6 +382,13 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 	if h.Notifier == nil {
 		return auth.Config{}, errors.New("api: no Notifier, but auth.require_verified_email is set, so nobody could verify an address")
 	}
+	// A code nobody sends is a door nobody can open, and with no provider
+	// configured it is the only door. Refused here rather than at the first
+	// sign-in, because there is nothing in a running system that would point at
+	// the configuration.
+	if h.Notifier == nil {
+		return auth.Config{}, errors.New("api: no Notifier, but auth.email_code.enabled is set, so every code would be minted and then dropped")
+	}
 
 	// The ranges whose X-Forwarded-For may be believed. rig validated these when
 	// it read the configuration; parsing here is what turns them into values
@@ -419,16 +435,19 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 			Logger: h.Logger,
 		},
 
-		Policy: password.Policy{MinLength: 14, MaxLength: 512},
-		// Only a hash prefix is sent, and the check fails open: a third party's
-		// outage must not stop somebody changing their password.
-		BreachChecker: password.NewHIBP(),
+		EmailCode: auth.EmailCodeOptions{
+			Enabled:           true,
+			Length:            8,
+			TTL:               15 * time.Minute,
+			MaxAttempts:       3,
+			AllowProvisioning: true,
+		},
 
-		AllowRegistration:    true,
 		AllowTenantCreation:  true,
 		RequireVerifiedEmail: true,
 		Tenants:              h.Tenants,
 		OnRegistered:         h.OnRegistered,
+		OnJoined:             h.OnJoined,
 
 		Grants:           h.Grants,
 		Notifier:         h.Notifier,
@@ -625,10 +644,12 @@ func limits() throttle.Defaults {
 	d := throttle.Standard()
 	d.LoginByEmail.Max, d.LoginByEmail.Window = 3, 10*time.Minute
 	d.LoginByIP.Max, d.LoginByIP.Window = 40, 15*time.Minute
-	d.PasswordReset.Max, d.PasswordReset.Window = 2, time.Hour
+	d.EmailCodeRequest.Max, d.EmailCodeRequest.Window = 2, time.Hour
+	d.EmailCodeByIP.Max, d.EmailCodeByIP.Window = 12, time.Hour
 	d.VerificationResend.Max, d.VerificationResend.Window = 5, time.Hour
 	d.Refresh.Max, d.Refresh.Window = 30, time.Minute
 	d.APIKeyFailures.Max, d.APIKeyFailures.Window = 20, time.Minute
+	d.InvitationPreview.Max, d.InvitationPreview.Window = 30, time.Hour
 	return d
 }
 

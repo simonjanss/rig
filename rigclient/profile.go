@@ -55,8 +55,9 @@ type AuthProfile struct {
 	// configured to read one.
 	TenantQuery string
 
-	// HasRegistration is POST <base>/register.
-	HasRegistration bool
+	// HasEmailCode is POST <base>/email-code and POST <base>/email-code/verify:
+	// whether this deployment signs anybody in with a mailed code.
+	HasEmailCode bool
 	// HasTenantCreation is POST <base>/tenants.
 	HasTenantCreation bool
 	// HasIdentitySessions is the tenant picker: /me/tenants and its siblings,

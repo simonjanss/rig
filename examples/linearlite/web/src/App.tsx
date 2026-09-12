@@ -6,11 +6,8 @@ import { useAuth } from "./auth/AuthContext.js";
 import { BoardPage } from "./board/BoardPage.js";
 import { TrashPage } from "./board/TrashPage.js";
 import { OutboxPage } from "./outbox/OutboxPage.js";
-import { ForgotPasswordPage } from "./screens/ForgotPasswordPage.js";
-import { LoginPage } from "./screens/LoginPage.js";
-import { RegisterPage } from "./screens/RegisterPage.js";
-import { ResetPasswordPage } from "./screens/ResetPasswordPage.js";
 import { SecurityPage } from "./security/SecurityPage.js";
+import { SignInPage } from "./screens/SignInPage.js";
 import { TenantPickerPage } from "./screens/TenantPickerPage.js";
 import { SettingsPage } from "./settings/SettingsPage.js";
 import { AppShell } from "./shell/AppShell.js";
@@ -21,26 +18,24 @@ function RequireSession({ children }: { children: ReactNode }) {
     const { phase } = useAuth();
     if (phase === "session") return children;
     return (
-        <Navigate to={phase === "identity" ? "/welcome" : "/login"} replace />
+        <Navigate to={phase === "identity" ? "/welcome" : "/signin"} replace />
     );
 }
 
 function RequireIdentity({ children }: { children: ReactNode }) {
     const { phase } = useAuth();
     if (phase === "identity") return children;
-    return <Navigate to={phase === "session" ? "/" : "/login"} replace />;
+    return <Navigate to={phase === "session" ? "/" : "/signin"} replace />;
 }
 
 export function App() {
     return (
         <Routes>
-            <Route path="/login" element={<LoginPage />} />
-            <Route path="/register" element={<RegisterPage />} />
-            {/* Both unauthenticated: the reset token is the credential, for
-                one use, and somebody who has forgotten their password has no
-                other one to offer. */}
-            <Route path="/forgot" element={<ForgotPasswordPage />} />
-            <Route path="/reset" element={<ResetPasswordPage />} />
+            {/* One screen where there used to be four. Signing in, signing
+                up, forgetting a password and resetting one all collapse into
+                "type your address, then type the code": there is no password
+                to forget and nothing to register beyond the address itself. */}
+            <Route path="/signin" element={<SignInPage />} />
             <Route
                 path="/welcome"
                 element={

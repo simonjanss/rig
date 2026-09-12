@@ -56,11 +56,16 @@ without it the routes that stop and start that container are not registered. See
 [Take the sync service down](#take-the-sync-service-down).
 
 Open [localhost:8084](http://localhost:8084) and sign in as
-`demo@linearlite.dev` / `correct horse battery staple` — or register a fresh
-account and watch requirement two happen: you arrive already inside the demo
-workspace, put there by the `OnRegistered` hook in `api/internal/app` inside the
-very transaction that created you, and the registration itself answers with the
-session for it.
+`demo@linearlite.dev`. There is no password: type the address, and the code rig
+would have mailed appears on the form, because this demonstration has no mail
+server.
+
+Or type an address nothing here has ever seen, and watch requirement two happen.
+`allow_provisioning` creates the person when the code is asked for, and the
+`OnRegistered` hook in `api/internal/app` invites them to the demo workspace
+inside the very transaction that created them — so typing the code back lands
+you in the picker with that invitation already waiting, one click from the
+board.
 
 For the full effect, open a second browser (or a private window) as
 `alex@linearlite.dev` and put the two side by side: each window's header shows
@@ -75,7 +80,7 @@ twice.
 |---|---|
 | The board updates without a reload | `electric: {enabled: true}` in `api/internal/services/todo/todo.yaml`; the generated shape routes on the API's own mux (`api/internal/generated/api/*_shape.gen.go`, wired through `api.Shapes` in `api/internal/app` — the proxy authenticates every subscriber and builds the tenant filter); `createTodoStream` + `useLiveQuery` in `web/src/board/` |
 | Who else is here, on which card, in which field | `presence: {enabled: true}` in rig.yaml and three lines across `api/internal/app` and `api/main.go`; `api/internal/services/rig_presence/rig_presence_shape.go` narrows the shape to a scope, which is the one thing that makes the fan-out affordable; `web/src/presence/` is the browser half — one loop for the whole app, built in an effect because StrictMode would otherwise orphan it, and a `useSpot` that ends where the panel does |
-| Register → straight into the demo tenant | `auth.allow_registration` in rig.yaml, and `autoInvite()` in `api/internal/app`: the `OnRegistered` hook provisions the newcomer, attaches the member role and leaves a verification link, all in the registration transaction. `Invite` is that link and not a pending membership — the account is live, which is why the registration comes back with a session |
+| A code, then an invitation to the demo tenant | `auth.email_code` in rig.yaml, and `autoInvite()` in `api/internal/app`: the `OnRegistered` hook *invites* the newcomer rather than provisioning them, so signing in leaves them in the picker with a door to knock on. Accepting is what creates the account, and `OnJoined` attaches the member role in the same transaction |
 | Create your own workspace | `auth.allow_tenant_creation`, with `authz.SeedFor` as `TenantOptions.OnCreated` — a new tenant gets its roles in the transaction that made it |
 | The item panel's History, and Revert | the snapshot triple in `api/internal/migrations/00002` — every update keeps the version it replaced, and `/todo/{id}/_versions/_stream` makes the panel grow while you edit |
 | The Trash, and Restore | `deleted_at` + `restore_window_days: 30`; the trash is a live shape too, so a delete visibly moves a card between windows |
@@ -84,10 +89,10 @@ twice.
 | Personal API keys on the settings page | `POST /auth/api-keys`, kind `Personal` — gated on `apikey.own`, which the member role grants because a personal key can never do more than its owner |
 | The import job | `go run ./import -key rig_sk_…`, from `api/` — the generated Go client (`api/client/`), a todo per CSV row, a deliberate delay so the board fills card by card, and idempotency keys so a rerun creates nothing |
 | **Claim it**, and its 409 | the `endpoints:` block in `api/internal/services/todo/todo.yaml` and `Claim` in `api/internal/services/todo/todo.go` — the one control that is not CRUD, because the rule is about the value already in the column |
-| **Outbox** | `api/internal/services/outbox` implements both interfaces rig ships no transport for: `account.Notifier` for the links auth mints, and `notify.Sender` for the email copy of an inbox line. `/_demo/outbox` reads it, and the reset and invite flows end there |
+| **Outbox** | `api/internal/services/outbox` implements both interfaces rig ships no transport for: `account.Notifier` for the secrets auth mints, and `notify.Sender` for the email copy of an inbox line. `/_demo/outbox` reads it, and the sign-in and invite flows end there. `/_demo/code` beside it is the one route a signed-out visitor can read, because a sign-in code has nowhere else to appear — a prop, and the sign-in screen says so |
 | **Monitor ↗** | `tracing:` and `monitoring:` in rig.yaml, wired in `api/main.go` — the last few hundred requests, what each spent its time on, and the log lines it wrote, at `http://localhost:9084/_rig/monitor`. Its own port, not the API's: which interface it is bound to is the only boundary in front of it a client cannot talk its way around |
 | **Security**: sessions and the sign-in trail | `GET /auth/sessions` and `GET /auth/audit`, both rig's own, neither generated from this schema. The trail is written whether or not anybody reads it. The **Just me / Everybody** switch is `?scope=all`, refused without `authlog.read.all` — which the Owner holds and a member does not |
-| Pending invitations, and changing your password | `GET /auth/invitations` + `DELETE`, and `POST /auth/password/change` — which answers with a fresh pair, because setting a password revokes every session the identity had, including the one that asked |
+| Pending invitations | `POST /auth/invitations`, `GET /auth/invitations` and `DELETE` — and nobody on that list is in the workspace, because accepting is what creates the account. Withdrawing one kills the link and removes nothing |
 | The workspace menu in the header | `GET /auth/tenants`, `POST /auth/tenants/{id}/switch`, and `POST /auth/tenants` to start one — three endpoints behind one control, in `web/src/shell/TenantSwitcher.tsx`. A switch answers with a pair and nothing else and then reloads, because the live-sync collections are cached by runtime rather than by credential |
 | **How you are told**, on the settings page | `notifications: expose: true` and nothing else — two generated resources with no hand-written HTTP and no `api/internal/services/` directory between them, because how rig's own tables project is rig's answer. Both are owner-scoped on `account_id`, so a read is narrowed to your own rows before any of this code runs, and a create that names somebody else is refused in the generated writer |
 | Desktop notifications | a second `notify.Sender` in `api/internal/services/outbox`, and the device rows it is handed. Email has an address on the account; a push has to be told where, and that is the whole difference. rig ships no Web Push, so the channel records what a real transport would have been given |
@@ -207,9 +212,9 @@ and the log line beside it names the shape.
    The board fills, card by card, while the job prints its report. Run it
    again: nothing duplicates — each row carries an idempotency key, and the
    server replays the recorded answers.
-9. Sign out, **Forgot your password?**, then sign back in as alex and open
-   **Outbox** for the link. Set a new password with it, and send the same link
-   twice: single-use means the second one is refused, not ignored.
+9. Sign out and sign back in as alex: type the address, and the code appears on
+   the screen because there is no mail server. Type it back, then try the same
+   code again — single-use means the second attempt is refused, not ignored.
 10. Settings → **How you are told** → **Register this browser**, then have alex
    change something of demo's. The Outbox now shows the same notification three
    ways: the inbox line demo can see in the bell, the mail the email channel was
@@ -340,7 +345,7 @@ version, revert, trash, restore, assign), the multipart attachment round trip,
 the import job with a minted key and a rerun that grows nothing, the
 notification rule with its actor exclusion, claiming an item and the 409 a
 second person gets, two people claiming at once and the one 200 between them, a
-steal reaching the person it was taken from, a password reset walked end to end
+steal reaching the person it was taken from, a sign-in code walked end to end
 through the outbox, a preference and a device being nobody's business but their
 owner's, and one notification arriving on both channels at once.
 `presence_docker_test.go` covers the half of presence a browser writes — a beat,

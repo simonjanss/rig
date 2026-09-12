@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -338,9 +339,11 @@ func TestTheLongestWindow(t *testing.T) {
 	if longest != time.Hour {
 		t.Errorf("longest window = %s, want 1h", longest)
 	}
-	// Two of the standard limits are an hour; the first of them wins, and what
+	// Four of the standard limits are an hour; the first of them wins, and what
 	// matters is that it is one of them rather than which.
-	if name != "password.reset" && name != "verification.resend" {
+	switch name {
+	case "emailcode.request", "emailcode.ip", "verification.resend", "invitation.preview":
+	default:
 		t.Errorf("longest window belongs to %q, want one of the hourly limits", name)
 	}
 
@@ -352,8 +355,10 @@ func TestTheLongestWindow(t *testing.T) {
 	}
 
 	// All is the set, and it has to stay the whole set: a limit missing from it
-	// is a window nothing checks against.
-	if n := len(throttle.Standard().All()); n != 6 {
-		t.Errorf("All returned %d limits, want the six Defaults has", n)
+	// is a window nothing checks against. Counted against the struct rather
+	// than a literal, so that adding a field and forgetting All is the failure
+	// rather than editing one number.
+	if got, want := len(throttle.Standard().All()), reflect.TypeOf(throttle.Defaults{}).NumField(); got != want {
+		t.Errorf("All returned %d limits, want the %d Defaults has", got, want)
 	}
 }

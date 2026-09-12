@@ -10,6 +10,7 @@ import (
 	"github.com/simonjanss/rig/auth/authlog"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
+	"github.com/simonjanss/rig/runtime/throttle"
 )
 
 // signInIdentity is the shared last step from the entry point a provider uses:
@@ -230,23 +231,17 @@ func TestSignInIdentityRefusesADisabledAccountAndAServiceAccount(t *testing.T) {
 	}
 }
 
-// RequireVerifiedEmail is one rule for both paths, and this is what pins it.
-//
-// It used to be the password path's alone, because oauth's LinkIdentity took a
-// verified address as evidence and never wrote it down — so refusing here would
-// have refused somebody on a column rather than on anything they did. It
-// records it now, so the exception has nothing left to protect.
+// RequireVerifiedEmail is what this door is held to, and the code door is not —
+// because typing the code *is* the confirmation, so gating it would refuse
+// somebody on a column their own request had just filled in.
 func TestSignInIdentityAppliesTheVerifiedEmailGate(t *testing.T) {
 	t.Parallel()
 
 	f := setupWith(t, func(c *account.Config) { c.RequireVerifiedEmail = true })
 
-	if _, err := f.signIn(goodPassword); rigerr.CodeOf(err) != rigerr.CodeForbidden {
-		t.Fatalf("Login err = %v, want the verified-email refusal", err)
-	}
 	_, err := f.signInIdentity(account.SignInIdentityInput{Method: "Google"})
 	if rigerr.CodeOf(err) != rigerr.CodeForbidden {
-		t.Fatalf("err = %v, want the same refusal a login gives", err)
+		t.Fatalf("err = %v, want the verified-email refusal", err)
 	}
 	if e, ok := f.log.last(authlog.EventLoginFailed); !ok || e.Detail["reason"] != "email not verified" {
 		t.Errorf("entry = %v, want the reason recorded", e.Detail)
@@ -287,18 +282,18 @@ func TestSignInIdentityRecordsTheMethodAndTheSession(t *testing.T) {
 	}
 }
 
-// A password login records nothing about a method, because there is nothing to
-// say: the absence is what "a password" means in the trail.
-func TestAPasswordLoginRecordsNoMethod(t *testing.T) {
+// A code sign-in names its method too, so that a trail with both doors in it
+// says which one each row came through.
+func TestACodeSignInRecordsItsMethod(t *testing.T) {
 	t.Parallel()
 
 	f := setup(t)
-	if _, err := f.login(goodPassword); err != nil {
+	if _, err := f.login(); err != nil {
 		t.Fatal(err)
 	}
 	e, _ := f.log.last(authlog.EventLoginSucceeded)
-	if _, ok := e.Detail["method"]; ok {
-		t.Errorf("detail = %v, want no method", e.Detail)
+	if e.Detail["method"] != "EmailCode" {
+		t.Errorf("detail = %v, want the method", e.Detail)
 	}
 }
 
@@ -306,23 +301,25 @@ func TestAPasswordLoginRecordsNoMethod(t *testing.T) {
 // event of its own, both deliberate and both surprising enough to pin.
 //
 // Clearing is safe: it takes control of the provider account, which is not
-// something somebody guessing a password has. And having no limit of its own is
-// right, because there is no credential being guessed — but it means the bound
-// on calling this comes from the caller and nowhere else.
+// something somebody guessing a code has. And having no limit of its own is
+// right, because there is no secret being guessed — but it means the bound on
+// calling this comes from the caller and nowhere else.
 func TestAProviderSignInAndTheLockout(t *testing.T) {
 	t.Parallel()
 
-	f := setup(t)
-	lock := func() {
-		for range 6 {
-			if _, err := f.signIn("wrong"); err != nil {
-				continue
-			}
+	f := setupWith(t, func(c *account.Config) {
+		c.Limits = throttle.Standard()
+		c.Limits.EmailCodeRequest.Max = 50
+		c.Limits.EmailCodeByIP.Max = 50
+	})
+	for range 6 {
+		code, err := f.askForCode()
+		if err != nil {
+			t.Fatal(err)
 		}
+		_, _ = f.verify(wrongCode(code))
 	}
-
-	lock()
-	if _, err := f.login(goodPassword); err == nil {
+	if _, err := f.login(); err == nil {
 		t.Fatal("the address should be locked out")
 	}
 
@@ -331,7 +328,7 @@ func TestAProviderSignInAndTheLockout(t *testing.T) {
 		t.Fatalf("a provider sign-in has no lockout of its own: %v", err)
 	}
 	// And it cleared it, because it is a LoginSucceeded.
-	if _, err := f.login(goodPassword); err != nil {
-		t.Errorf("a provider sign-in should lift the password lockout: %v", err)
+	if _, err := f.login(); err != nil {
+		t.Errorf("a provider sign-in should lift the code lockout: %v", err)
 	}
 }

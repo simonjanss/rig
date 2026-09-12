@@ -9,8 +9,8 @@ type AccountKind string
 
 // The values of AccountKind.
 const (
-	// Somebody who signs in. They have an identity, and the identity has the
-	// password.
+	// Somebody who signs in. They have an identity, and the identity is what a
+	// provider or a code authenticates.
 	AccountKindPerson AccountKind = "Person"
 	// What an integration's key acts as. It has no identity, so there is nothing
 	// to sign in with.

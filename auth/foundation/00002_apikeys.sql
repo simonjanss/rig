@@ -89,11 +89,23 @@ CREATE INDEX rig_identity_created_by_api_key_id_idx ON rig_identity (created_by_
 CREATE INDEX rig_identity_updated_by_api_key_id_idx ON rig_identity (updated_by_api_key_id);
 CREATE INDEX rig_identity_deleted_by_api_key_id_idx ON rig_identity (deleted_by_api_key_id);
 
+-- And an invitation can say which key sent it, for the same reason. The column
+-- is declared in migration 1 beside the account it pairs with; the reference
+-- waits for rig_api_key to exist, which is this migration.
+ALTER TABLE rig_identity_verification
+    ADD CONSTRAINT rig_identity_verification_invited_by_api_key_id_fkey
+        FOREIGN KEY (invited_by_api_key_id) REFERENCES rig_api_key (id);
+
+CREATE INDEX rig_identity_verification_invited_by_api_key_id_idx
+    ON rig_identity_verification (invited_by_api_key_id);
+
 -- +goose StatementEnd
 
 -- +goose Down
 -- +goose StatementBegin
 
+ALTER TABLE rig_identity_verification
+    DROP CONSTRAINT rig_identity_verification_invited_by_api_key_id_fkey;
 ALTER TABLE rig_identity
     DROP COLUMN deleted_by_api_key_id,
     DROP COLUMN updated_by_api_key_id,

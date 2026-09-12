@@ -5,8 +5,8 @@
 /** What an account is. */
 export const AccountKind = {
     /**
-     * Somebody who signs in. They have an identity, and the identity has the
-     * password.
+     * Somebody who signs in. They have an identity, and the identity is what a
+     * provider or a code authenticates.
      */
     Person: "Person",
     /**

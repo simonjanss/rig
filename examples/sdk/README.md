@@ -33,8 +33,10 @@ cd examples/sdk  && go run . auth
 
 All three take `-base-url` if the server is somewhere else. `todo` and `import`
 also take `-tenant`, because that example has no authentication and reads the
-tenant from a header; `auth` takes `-email` and `-password`, defaulting to the
-account the example seeds.
+tenant from a header; `auth` takes `-email`, defaulting to the account the
+example seeds, and `-code`. Run it without one and it asks for a code and stops,
+because the code lands on the `examples/auth` page rather than in your inbox —
+read it there and run it again with `-code`.
 
 `go run . import -dry-run` needs no server at all.
 

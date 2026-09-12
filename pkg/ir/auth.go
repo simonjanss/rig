@@ -16,14 +16,14 @@ type Auth struct {
 	// BasePath is the prefix the endpoints sit under, for example "/auth".
 	BasePath string `json:"base_path"`
 
-	Tenant   AuthTenant   `json:"tenant"`
-	Session  AuthSession  `json:"session"`
-	Password AuthPassword `json:"password"`
-	Limits   AuthLimits   `json:"limits"`
+	Tenant  AuthTenant  `json:"tenant"`
+	Session AuthSession `json:"session"`
+	// EmailCode is the mailed-code sign-in. It is a value rather than a pointer
+	// because Enabled already carries the off state, and a nil would make every
+	// consumer nil-check before reading one bool.
+	EmailCode AuthEmailCode `json:"email_code"`
+	Limits    AuthLimits    `json:"limits"`
 
-	// AllowRegistration mounts POST <base>/register, where a stranger creates an
-	// account with no tenant.
-	AllowRegistration bool `json:"allow_registration"`
 	// AllowTenantCreation mounts POST <base>/tenants, where somebody signed in
 	// makes one and becomes its owner.
 	AllowTenantCreation bool `json:"allow_tenant_creation"`
@@ -109,27 +109,44 @@ type AuthSession struct {
 	IdentityTTL Duration `json:"identity_ttl"`
 }
 
-// AuthPassword is what a new password must satisfy.
-type AuthPassword struct {
-	MinLength int `json:"min_length"`
-	MaxLength int `json:"max_length"`
-	// BreachCheck consults Have I Been Pwned's range API when a password is set.
-	// The password never leaves the process; five hex digits of its hash do.
-	BreachCheck bool `json:"breach_check"`
+// AuthEmailCode is the mailed-code sign-in: a short numeric code sent to an
+// address and typed back.
+type AuthEmailCode struct {
+	// Enabled mounts POST <base>/email-code and POST <base>/email-code/verify.
+	Enabled bool `json:"enabled"`
+	// Length is how many digits the code has.
+	Length int `json:"length"`
+	// TTL is how long a code lasts.
+	TTL Duration `json:"ttl"`
+	// MaxAttempts is how many wrong guesses kill one code. It is a ceiling on
+	// the code rather than a rate limit on the address, which is why it is here
+	// and not in AuthLimits.
+	MaxAttempts int `json:"max_attempts"`
+	// AllowProvisioning sends a code to an address rig has never seen, creating
+	// the person. Off means a code goes only to an address that already has an
+	// identity.
+	AllowProvisioning bool `json:"allow_provisioning"`
 }
 
 // AuthLimits are the rate limits, counted in the database.
 type AuthLimits struct {
-	// LoginByEmail locks one account after a handful of wrong passwords.
+	// LoginByEmail locks one account after a handful of wrong codes.
 	LoginByEmail AuthLimit `json:"login_by_email"`
 	// LoginByIP throttles one source spraying many accounts. It is deliberately
 	// looser than the address limit, so an office behind one NAT does not trip it.
-	LoginByIP          AuthLimit `json:"login_by_ip"`
-	PasswordReset      AuthLimit `json:"password_reset"`
+	LoginByIP AuthLimit `json:"login_by_ip"`
+	// EmailCodeRequest bounds codes mailed per address, and EmailCodeByIP bounds
+	// them per source across every address — which is what limits identity
+	// creation when AuthEmailCode.AllowProvisioning is set.
+	EmailCodeRequest   AuthLimit `json:"email_code_request"`
+	EmailCodeByIP      AuthLimit `json:"email_code_ip"`
 	VerificationResend AuthLimit `json:"verification_resend"`
 	// Refresh bounds one session's rotations.
 	Refresh        AuthLimit `json:"refresh"`
 	APIKeyFailures AuthLimit `json:"api_key_failures"`
+	// InvitationPreview bounds reading an invitation link per source. It is the
+	// one unauthenticated endpoint keyed by a secret rather than an address.
+	InvitationPreview AuthLimit `json:"invitation_preview"`
 }
 
 // AuthLimit is one limit: how many, and over how long.

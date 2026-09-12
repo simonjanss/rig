@@ -24,7 +24,7 @@ var profile = rigclient.AuthProfile{
 	RotationLeeway:      45 * time.Second,
 	IdentityTTL:         10 * time.Minute,
 	TenantHeader:        "X-Tenant-Id",
-	HasRegistration:     true,
+	HasEmailCode:        true,
 	HasIdentitySessions: true,
 	HasAPIKeys:          true,
 }
@@ -69,7 +69,7 @@ func (s *authServer) pair() authwire.TokenPair {
 func (s *authServer) handler() http.Handler {
 	mux := http.NewServeMux()
 
-	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /auth/email-code/verify", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(authwire.SignInResponse{
 			TokenPair: s.pair(), IdentityToken: "rig_it_1",
 			Tenants: []authwire.TenantView{},
@@ -115,8 +115,8 @@ func newSignedIn(t *testing.T) (*rigclient.Runtime, *authServer) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Auth().SignIn(t.Context(), authwire.LoginRequest{
-		EmailAddress: "someone@example.com", Password: "correct horse",
+	if _, err := rt.Auth().SignIn(t.Context(), authwire.VerifyEmailCodeRequest{
+		EmailAddress: "someone@example.com", Code: "012345",
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -222,7 +222,7 @@ func TestSignInDoesNotPresentTheOldToken(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if _, err := rt.Auth().Login(t.Context(), authwire.LoginRequest{}); err != nil {
+	if _, err := rt.Auth().VerifyEmailCode(t.Context(), authwire.VerifyEmailCodeRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if presented != "" {
@@ -267,7 +267,7 @@ func TestTheTenantIsNamedOnASignIn(t *testing.T) {
 
 	tenant := uuid.MustParse("6ba7b810-9dad-11d1-80b4-00c04fd430c8")
 	auth := rt.Auth()
-	if _, err := auth.Login(t.Context(), authwire.LoginRequest{}, auth.WithTenant(tenant)); err != nil {
+	if _, err := auth.VerifyEmailCode(t.Context(), authwire.VerifyEmailCodeRequest{}, auth.WithTenant(tenant)); err != nil {
 		t.Fatal(err)
 	}
 	if got != tenant.String() {
@@ -303,7 +303,7 @@ func TestASecondSignInDoesNotInheritTheFirstsRefreshToken(t *testing.T) {
 
 	auth := rt.Auth()
 	for range 2 {
-		if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+		if _, err := auth.SignIn(t.Context(), authwire.VerifyEmailCodeRequest{}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -326,7 +326,7 @@ func TestASecondSignInDoesNotInheritTheFirstsRefreshToken(t *testing.T) {
 // next expiry.
 func TestATenantSwitchKeepsTheRefreshTokenItWasNotGivenAgain(t *testing.T) {
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /auth/email-code/verify", func(w http.ResponseWriter, _ *http.Request) {
 		json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: authwire.TokenPair{
 			AccessToken: "rig_at_1", RefreshToken: "rig_rt_1",
 		}})
@@ -344,7 +344,7 @@ func TestATenantSwitchKeepsTheRefreshTokenItWasNotGivenAgain(t *testing.T) {
 	}
 
 	auth := rt.Auth()
-	if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+	if _, err := auth.SignIn(t.Context(), authwire.VerifyEmailCodeRequest{}); err != nil {
 		t.Fatal(err)
 	}
 	if _, err := auth.SwitchTenant(t.Context(), uuid.New()); err != nil {
@@ -491,7 +491,7 @@ func TestASignInWithNoBodyInstallsNothing(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	res, err := rt.Auth().SignIn(t.Context(), authwire.LoginRequest{})
+	res, err := rt.Auth().SignIn(t.Context(), authwire.VerifyEmailCodeRequest{})
 	if err != nil {
 		t.Fatalf("a sign-in with no body failed: %v", err)
 	}
@@ -533,13 +533,19 @@ func TestAcceptingAnInvitationWithNoBodyInstallsNothing(t *testing.T) {
 // an identity token and no session is the tenant picker, and it leaves whatever
 // the client was already holding alone.
 func TestAnAnswerWithNoSessionLeavesTheClientAsItWas(t *testing.T) {
+	// The first sign-in lands in a tenant; the second answers the picker's
+	// shape — an identity token and no pair, which is what somebody who belongs
+	// nowhere gets.
+	var calls int
 	mux := http.NewServeMux()
-	mux.HandleFunc("POST /auth/login", func(w http.ResponseWriter, _ *http.Request) {
-		json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: authwire.TokenPair{
-			AccessToken: "rig_at_1", RefreshToken: "rig_rt_1",
-		}})
-	})
-	mux.HandleFunc("POST /auth/register", func(w http.ResponseWriter, _ *http.Request) {
+	mux.HandleFunc("POST /auth/email-code/verify", func(w http.ResponseWriter, _ *http.Request) {
+		calls++
+		if calls == 1 {
+			json.NewEncoder(w).Encode(authwire.SignInResponse{TokenPair: authwire.TokenPair{
+				AccessToken: "rig_at_1", RefreshToken: "rig_rt_1",
+			}})
+			return
+		}
 		json.NewEncoder(w).Encode(authwire.SignInResponse{IdentityToken: "rig_it_1"})
 	})
 	srv := httptest.NewServer(mux)
@@ -552,10 +558,10 @@ func TestAnAnswerWithNoSessionLeavesTheClientAsItWas(t *testing.T) {
 	}
 
 	auth := rt.Auth()
-	if _, err := auth.SignIn(t.Context(), authwire.LoginRequest{}); err != nil {
+	if _, err := auth.SignIn(t.Context(), authwire.VerifyEmailCodeRequest{}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := auth.Register(t.Context(), authwire.RegisterRequest{}); err != nil {
+	if _, err := auth.SignIn(t.Context(), authwire.VerifyEmailCodeRequest{}); err != nil {
 		t.Fatal(err)
 	}
 

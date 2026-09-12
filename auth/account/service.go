@@ -1,18 +1,23 @@
 // Package account implements the sign-in flows.
 //
+// There are two ways in and rig stores no passwords. A provider vouches for
+// somebody (see [github.com/simonjanss/rig/auth/oauth]), or rig mails a short
+// code to the address they are signing in with and they type it back — which is
+// this package's own door, and the one anybody with no provider account uses.
+//
 // Everything here exists to get a handful of details right that are easy to get
 // wrong and expensive to get wrong:
 //
-//   - The lockout is checked before the password is verified, so a locked
-//     request neither burns an argon2 hash nor extends its own window.
-//   - A login for an address with no account still spends the time an argon2
-//     hash costs, so response time is not a membership oracle.
-//   - A wrong password and a disabled account are told apart only after the
-//     password is verified, so "this account is disabled" cannot be used to
-//     enumerate accounts.
-//   - A password reset answers the same way whether or not the address exists.
-//   - Setting a new password ends every session, because a change made because
-//     somebody else knows your password is not a change if they stay signed in.
+//   - The lockout is checked before the code is compared, so a locked request
+//     neither does the work nor extends its own window.
+//   - A sign-in for an address rig has never seen takes the same time as one
+//     for an address it has, so response time is not a membership oracle.
+//   - A wrong code and a disabled account are told apart only after the code is
+//     compared, so "this account is disabled" cannot be used to enumerate
+//     accounts.
+//   - Asking for a code answers the same way whether or not the address exists.
+//   - A code dies after a few wrong guesses rather than merely being slowed
+//     down, because six digits are guessable in a way a token is not.
 package account
 
 import (
@@ -32,26 +37,23 @@ import (
 	"github.com/simonjanss/rig/runtime/outbox"
 
 	"github.com/simonjanss/rig/auth/authlog"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
 )
 
-// ErrInvalidCredentials is the answer to every failed sign-in.
-//
-// One error for a wrong password and for an address nobody has ever registered,
-// because the difference is exactly what an attacker is trying to learn.
-var ErrInvalidCredentials = rigerr.Unauthorized("the email address or password is not correct")
-
 // Defaults.
 const (
-	// DefaultMinDuration pads a login. Verifying a real hash and verifying the
-	// dummy take about the same time, but "about" is measurable over enough
-	// samples; a floor makes the remaining difference noise.
+	// DefaultMinDuration pads a sign-in, and it is the whole of what keeps an
+	// address rig knows and one it does not indistinguishable.
+	//
+	// Comparing a code costs one sha256 whether or not the address exists, which
+	// is far too cheap to hide the reads around it: the lookup that finds
+	// nobody returns sooner than the one that finds a person and their live
+	// code. A floor over both makes the difference noise. It used to be
+	// belt-and-braces over an argon2 hash that did most of this work; it is not
+	// any more, so do not read it as a tax and remove it.
 	DefaultMinDuration = 750 * time.Millisecond
-	// DefaultResetTTL is short: a reset link is a live credential.
-	DefaultResetTTL = time.Hour
 	// DefaultVerificationTTL is longer, because confirming an address is not
 	// urgent and a link that expires while somebody is at lunch is a support
 	// ticket.
@@ -74,10 +76,14 @@ type Config struct {
 	// Required: a sign-in always produces one, including for somebody who lands
 	// straight in a tenant, because switching later is the same flow.
 	Identities *session.IdentityManager
-	Hasher     *password.Hasher
-	Policy     password.Policy
 	Log        authlog.Log
 	Notifier   Notifier
+
+	// EmailCode is the mailed-code sign-in. The zero value is off, and a
+	// deployment with no provider configured either has no way in at all —
+	// which [New] does not refuse, because a service that only provisions and
+	// invites is a legitimate thing to build.
+	EmailCode EmailCodeOptions
 
 	// Outbox turns mail queueing on, and its presence is the whole switch.
 	//
@@ -107,29 +113,48 @@ type Config struct {
 	// zero value lets anybody signed in make one called anything.
 	Tenants TenantOptions
 
-	// OnRegistered runs inside the transaction that creates a self-registered
-	// identity — after the person and their credential exist, before the
-	// identity session is issued. Returning an error rolls the whole sign-up
-	// back, so a retry is a clean retry rather than a conflict with a half-made
-	// account.
+	// OnRegistered runs inside the transaction that creates a person rig has
+	// never seen — asking for a sign-in code with a new address, where
+	// [EmailCodeOptions.AllowProvisioning] allows it. Returning an error rolls
+	// the whole thing back, so a retry is a clean retry rather than a conflict
+	// with a half-made identity.
 	//
 	// It receives the service because the ordinary body is a call back into it —
-	// [Service.Provision] with Invite set, bringing the newcomer into a starter
-	// tenant — and the closure is handed to [New] before the service exists.
-	// Reach the transaction itself with dbx.Tx(ctx), the same way a generated
-	// repository does.
+	// [Service.Provision], bringing the newcomer into a starter tenant, or
+	// [Service.Invite] to leave one waiting in their picker — and the closure is
+	// handed to [New] before the service exists. Reach the transaction itself
+	// with dbx.Tx(ctx), the same way a generated repository does.
 	//
-	// Nil, the default, registers the person and nothing else.
+	// One thing to know before using it for anything expensive: it runs when the
+	// code is *asked for*, not when it is typed back, because the row that holds
+	// the code references the person. So a starter tenant made here may belong
+	// to somebody who never finishes signing in.
+	//
+	// Nil, the default, creates the person and nothing else.
 	OnRegistered func(ctx context.Context, accounts *Service, in Registered) error
+
+	// OnJoined runs inside the transaction that accepts an invitation — after
+	// the account exists, before the session is issued. Returning an error rolls
+	// the whole acceptance back, so a retry is a clean retry rather than a
+	// member with half a setup.
+	//
+	// It exists because of where an account now comes from. [Service.Provision]
+	// is called by the application, so whatever else a new member needs — a
+	// role's grants, a preferences row — is the caller's next line. Accepting an
+	// invitation is called by rig's own handler, and this is that line.
+	//
+	// Reach the transaction with dbx.Tx(ctx). It does not receive the service:
+	// the ordinary body is a write against the application's own tables rather
+	// than a call back into this package.
+	OnJoined func(ctx context.Context, in Joined) error
 
 	// Limiter and Limits are what stop somebody guessing. A service built
 	// without a limiter refuses to exist: a login endpoint with no lockout is
-	// not a login endpoint, it is a password oracle with a queue.
+	// not a sign-in endpoint, it is a guessing oracle with a queue.
 	Limiter *throttle.Limiter
 	Limits  throttle.Defaults
 
 	MinDuration     time.Duration
-	ResetTTL        time.Duration
 	VerificationTTL time.Duration
 	// InvitationTTL bounds an invitation. It is the longest of the three by
 	// default: somebody invited on a Friday should still be able to join on
@@ -178,15 +203,9 @@ func New(cfg Config) (*Service, error) {
 			"a sign-in issues one whether or not it lands in a tenant")
 	case cfg.Limiter == nil:
 		return nil, errors.New("account: a throttle.Limiter is required; " +
-			"a login endpoint with no lockout is a password oracle with a queue")
+			"a sign-in endpoint with no lockout is a guessing oracle with a queue")
 	}
 
-	if cfg.Hasher == nil {
-		cfg.Hasher = password.New(password.DefaultParams())
-	}
-	if cfg.Policy.MinLength == 0 {
-		cfg.Policy = password.DefaultPolicy()
-	}
 	if cfg.Log == nil {
 		cfg.Log = authlog.Noop{}
 	}
@@ -195,9 +214,6 @@ func New(cfg Config) (*Service, error) {
 	}
 	if cfg.Limits == (throttle.Defaults{}) {
 		cfg.Limits = throttle.Standard()
-	}
-	if cfg.ResetTTL == 0 {
-		cfg.ResetTTL = DefaultResetTTL
 	}
 	if cfg.VerificationTTL == 0 {
 		cfg.VerificationTTL = DefaultVerificationTTL
@@ -208,6 +224,12 @@ func New(cfg Config) (*Service, error) {
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
+
+	code, err := resolveEmailCode(cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.EmailCode = code
 
 	mail, err := resolveMail(cfg)
 	if err != nil {
@@ -295,30 +317,6 @@ func resolveMail(cfg Config) (MailOptions, error) {
 	return m, nil
 }
 
-// LoginInput is a sign-in attempt.
-type LoginInput struct {
-	// TenantID says which tenant the session is for, and may be left empty.
-	//
-	// Set it when the application already knows — a subdomain, a header, a path
-	// segment — and the sign-in is refused unless the person belongs to that
-	// tenant. Leave it empty and the person is signed in to one of their own
-	// tenants, which is what a single sign-in page wants: nobody knows which
-	// tenants an address belongs to until the password is checked, so asking
-	// first is asking a question the visitor cannot answer.
-	//
-	// Either way the address is not looked up in a tenant: an address is one
-	// person across every tenant, and the tenant only decides which of that
-	// person's accounts the session belongs to.
-	TenantID     uuid.UUID
-	EmailAddress string
-	Password     string
-
-	Remember  bool
-	Client    session.Client
-	IPAddress string
-	UserAgent string
-}
-
 // SignInResult is what a sign-in produced.
 //
 // Two credentials, because there are two states a signed-in person can be in.
@@ -349,113 +347,6 @@ type SignInResult struct {
 	Tenants []Membership
 }
 
-// Login signs somebody in.
-func (s *Service) Login(ctx context.Context, in LoginInput) (SignInResult, error) {
-	started := s.now()
-	email := normalizeEmail(in.EmailAddress)
-
-	pair, err := s.login(ctx, in, email)
-
-	// The pad runs on both paths. Padding only failures would make success the
-	// fast answer, which is the same oracle in reverse.
-	if d := s.minDuration(); d > 0 {
-		s.sleep(ctx, d-s.now().Sub(started))
-	}
-	return pair, err
-}
-
-func (s *Service) login(ctx context.Context, in LoginInput, email string) (SignInResult, error) {
-	at := signInAttempt{
-		tenantID:  in.TenantID,
-		email:     email,
-		ipAddress: in.IPAddress,
-		userAgent: in.UserAgent,
-	}
-
-	// Before the password, before the account lookup, before anything
-	// expensive. A locked request that still ran argon2 would let an attacker
-	// keep the server busy for free, and a locked request that still recorded a
-	// failure would keep extending its own lockout.
-	decision, err := s.cfg.Limiter.Allow(ctx,
-		throttle.Check{Limit: s.cfg.Limits.LoginByEmail, Key: throttle.Email(email)},
-		throttle.Check{Limit: s.cfg.Limits.LoginByIP, Key: throttle.IP(in.IPAddress)},
-	)
-	if err != nil {
-		return SignInResult{}, err
-	}
-	if !decision.Allowed {
-		locked := authlog.Entry{
-			Event: authlog.EventAccountLocked, Outcome: authlog.Failed,
-			EmailAddress: email,
-			IPAddress:    in.IPAddress, UserAgent: in.UserAgent,
-			Detail: map[string]any{"limit": decision.Limit.Name},
-		}
-		if in.TenantID != uuid.Nil {
-			locked.TenantID = &in.TenantID
-		}
-		s.write(ctx, locked)
-		return SignInResult{}, decision.Err()
-	}
-
-	// The person, found without reference to the tenant. The password is theirs
-	// and so is the address; which tenant this session is for comes next.
-	ident, err := s.cfg.Store.FindIdentityByEmail(ctx, email)
-	if err != nil {
-		return SignInResult{}, err
-	}
-
-	// The hash to check against, real or not. Skipping the work for an unknown
-	// address is what turns response time into a list of your customers.
-	stored := s.cfg.Hasher.Dummy()
-	if ident != nil {
-		cred, err := s.cfg.Store.Credential(ctx, ident.ID)
-		if err != nil {
-			return SignInResult{}, err
-		}
-		if cred != nil {
-			stored = cred.PasswordHash
-		}
-	}
-
-	ok, needsRehash, err := s.cfg.Hasher.Verify(stored, in.Password)
-	if err != nil && !errors.Is(err, password.ErrMalformed) {
-		return SignInResult{}, err
-	}
-	if !ok || ident == nil {
-		s.failSignIn(ctx, at, nil, "wrong credentials")
-		return SignInResult{}, ErrInvalidCredentials
-	}
-
-	// Only now, with the password confirmed, is it safe to say anything about
-	// the person. Refusing a disabled one before this point would answer
-	// "disabled" to anybody who guessed the address.
-	if !ident.IsActive {
-		s.failSignIn(ctx, at, nil, "identity disabled")
-		return SignInResult{}, rigerr.Forbidden("this account has been disabled")
-	}
-	if err := s.refuseUnverified(ctx, at, ident); err != nil {
-		return SignInResult{}, err
-	}
-
-	if needsRehash {
-		// Best effort, and before the tenant is settled rather than after: this
-		// is the only moment the plaintext exists, so an upgrade that waited for
-		// somewhere to land would never happen for somebody who has nowhere.
-		// Failing the login over a bookkeeping write would be worse than leaving
-		// the hash where it is.
-		_ = s.storePassword(ctx, ident, in.Password)
-	}
-
-	return s.signInIdentity(ctx, ident, SignInIdentityInput{
-		IdentityID: ident.ID,
-		TenantID:   in.TenantID,
-		Remember:   in.Remember,
-		Client:     in.Client,
-		IPAddress:  in.IPAddress,
-		UserAgent:  in.UserAgent,
-	})
-}
-
 // SignInIdentityInput is a sign-in that already knows who somebody is.
 type SignInIdentityInput struct {
 	IdentityID uuid.UUID
@@ -467,9 +358,9 @@ type SignInIdentityInput struct {
 	Client    session.Client
 	IPAddress string
 	UserAgent string
-	// Method is how the person proved who they are — a provider name, "Google" —
-	// and lands in the audit entry's detail. Empty is a password, which is what
-	// the entry means when it says nothing.
+	// Method is how the person proved who they are — a provider name, "Google",
+	// or "EmailCode" — and lands in the audit entry's detail. Empty means
+	// nothing is claimed, which is what an invitation being accepted says.
 	Method string
 }
 
@@ -477,10 +368,10 @@ type SignInIdentityInput struct {
 //
 // It is the whole tail of a sign-in: which of the person's accounts this session
 // is for, the tenant list the picker draws from, the identity token, the session
-// itself, and the audit entry. [Service.Login] calls it once the password has
-// been checked, and a provider sign-in calls it once the provider has said who
-// this is — which is what stops the two paths answering "where does this person
-// go" differently.
+// itself, and the audit entry. [Service.VerifyEmailCode] calls it once the code
+// has been compared, and a provider sign-in calls it once the provider has said
+// who this is — which is what stops the two paths answering "where does this
+// person go" differently.
 //
 // Input.TenantID may be uuid.Nil, and that is an ordinary answer rather than a
 // missing one. Named: that tenant or a refusal. Nil: wherever they belong —
@@ -496,23 +387,21 @@ type SignInIdentityInput struct {
 // rig_identity_oauth carries no deleted_at and no is_active, and
 // RequireVerifiedEmail.
 //
-// That last one used to be the password path's alone, because oauth's
-// LinkIdentity took a verified address as evidence and never wrote it down, so
-// enforcing it here would have refused somebody on a column rather than on
-// anything they did. LinkIdentity records it now, so the exception is gone and
-// a provider sign-in is held to the same rule a login is.
+// That last one is what this door is for. oauth's LinkIdentity records the
+// verified address it took as evidence, so a provider sign-in can be held to
+// the rule rather than exempted from it on a column nobody filled in.
 //
-// [Service.Register] is not held to it, and that is deliberate rather than an
-// oversight: it calls the unexported half of this, because refusing somebody
-// the response to their own registration for not having confirmed an address
-// they have had for one request would make the endpoint useless. The identity
-// token it hands back has never been gated either — accepting an invitation
-// and creating a tenant both work unverified, and always have.
+// The code flow is not held to it, and that is deliberate rather than an
+// oversight: it calls the unexported half of this, because confirming the
+// address *is* what typing the code did, and gating the tail would refuse
+// somebody on a column their own request had just filled in. Accepting an
+// invitation and creating a tenant are ungated for the same reason and always
+// have been.
 //
 // Two things about the audit trail are worth knowing before wiring it to
 // something new. It writes EventLoginSucceeded and EventLoginFailed, which is
 // what [github.com/simonjanss/rig/runtime/throttle.Standard] counts and clears
-// — so a provider sign-in lifts the address's password lockout, which is safe
+// — so a provider sign-in lifts the address's code lockout, which is safe
 // because it takes control of the provider account, and a refusal in here counts
 // towards that lockout. And it writes what the limiter counts without consulting
 // the limiter, which is right when there is nothing being guessed but means the
@@ -525,9 +414,10 @@ func (s *Service) SignInIdentity(ctx context.Context, in SignInIdentityInput) (S
 		return SignInResult{}, err
 	}
 	if ident == nil {
-		// Unreachable from a password login, which returns before this. It is
-		// here for the provider path: a link in rig_identity_oauth survives the
-		// soft delete of the identity it hangs off.
+		// Unreachable from the code flow, which returns before this having read
+		// the identity to find the code. It is here for the provider path: a
+		// link in rig_identity_oauth survives the soft delete of the identity it
+		// hangs off.
 		s.failSignIn(ctx, signInAttempt{
 			tenantID:  in.TenantID,
 			ipAddress: in.IPAddress,
@@ -548,15 +438,15 @@ func (s *Service) SignInIdentity(ctx context.Context, in SignInIdentityInput) (S
 	return s.signInIdentity(ctx, ident, in)
 }
 
-// refuseUnverified is the RequireVerifiedEmail gate, in the two places a sign-in
-// can start: a password checked by [Service.login], and an identity somebody
-// else vouched for through [Service.SignInIdentity].
+// refuseUnverified is the RequireVerifiedEmail gate, and it applies to one door:
+// an identity somebody else vouched for, through [Service.SignInIdentity].
 //
-// Not in the shared tail both of them call, because [Service.Register] calls
-// that one too and a person who registered a moment ago has confirmed nothing.
-// The seam already existed for a different reason — a login has the identity
-// row in hand and should not read it twice — and this is the second thing it is
-// good for.
+// Not in the shared tail, and that is what makes the code flow work at all.
+// [Service.VerifyEmailCode] confirms the address as part of signing somebody in
+// — the code went to that address and came back, which is the same proof an
+// invitation link is — so gating the tail would refuse somebody on a column
+// their own request had just filled in. It calls the unexported half for that
+// reason, the way accepting an invitation does.
 func (s *Service) refuseUnverified(ctx context.Context, at signInAttempt, ident *Identity) error {
 	if !s.cfg.RequireVerifiedEmail || ident.Verified() {
 		return nil
@@ -567,9 +457,10 @@ func (s *Service) refuseUnverified(ctx context.Context, at signInAttempt, ident 
 
 // signInIdentity is [Service.SignInIdentity] with the identity already read.
 //
-// The seam exists so that a password login pays for one read of rig_identity
-// rather than two: it has the row in hand by the time the password has been
-// checked.
+// The seam exists for two reasons. A caller that has the row in hand should not
+// read it twice — the code flow does, having looked the address up to find the
+// code. And it skips RequireVerifiedEmail, which is what the code flow needs:
+// see [Service.refuseUnverified].
 func (s *Service) signInIdentity(
 	ctx context.Context, ident *Identity, in SignInIdentityInput,
 ) (SignInResult, error) {
@@ -719,9 +610,9 @@ func (s *Service) accountFor(ctx context.Context, tenantID, identityID uuid.UUID
 // signInAttempt is what an audit entry needs about a sign-in regardless of how
 // the person proved who they are.
 //
-// It exists because the tail of a sign-in is shared between a password and a
-// provider, and threading a LoginInput through it would have made the shared
-// half of the flow depend on the password half's shape.
+// It exists because the tail of a sign-in is shared between a code, a provider
+// and an invitation, and threading any one of their inputs through it would have
+// made the shared half of the flow depend on that one's shape.
 type signInAttempt struct {
 	tenantID  uuid.UUID
 	email     string
@@ -751,8 +642,8 @@ func (at signInAttempt) entry(e authlog.Entry) authlog.Entry {
 // failSignIn records a refused sign-in.
 //
 // The reason goes in the detail, never in the response. An operator reading the
-// log needs to know the difference between a wrong password and a disabled
-// account; the person at the keyboard is told the same thing either way.
+// log needs to know the difference between a wrong code and a disabled account;
+// the person at the keyboard is told the same thing either way.
 func (s *Service) failSignIn(ctx context.Context, at signInAttempt, acct *Account, reason string) {
 	e := at.entry(authlog.Entry{
 		Event: authlog.EventLoginFailed, Outcome: authlog.Failed,
@@ -776,166 +667,6 @@ func (s *Service) Logout(ctx context.Context, rootTokenID uuid.UUID) error {
 // would take down the person's other devices along with it.
 func (s *Service) Refresh(ctx context.Context, presented string) (session.Pair, error) {
 	return s.cfg.Sessions.Rotate(ctx, presented)
-}
-
-// RequestPasswordReset mints a reset link and hands it to the notifier.
-//
-// It answers the same way whether or not the address exists, and it records the
-// attempt either way — which is what makes the rate limit work: an attacker
-// hammering addresses to see which ones respond differently gets the same
-// answer every time and runs out of budget doing it.
-//
-// The tenant is only for the log entry. A password belongs to the person, so
-// somebody who has forgotten theirs is not asking about one tenant, and
-// answering "no such address here" from the wrong subdomain would be a puzzle
-// with no solution.
-func (s *Service) RequestPasswordReset(ctx context.Context, tenantID uuid.UUID, emailAddress, ip string) error {
-	email := normalizeEmail(emailAddress)
-
-	decision, err := s.cfg.Limiter.Allow(ctx,
-		throttle.Check{Limit: s.cfg.Limits.PasswordReset, Key: throttle.Email(email)})
-	if err != nil {
-		return err
-	}
-	if !decision.Allowed {
-		return decision.Err()
-	}
-
-	ident, err := s.cfg.Store.FindIdentityByEmail(ctx, email)
-	if err != nil {
-		return err
-	}
-
-	entry := authlog.Entry{
-		Event: authlog.EventPasswordResetRequested, Outcome: authlog.Failed,
-		TenantID: &tenantID, EmailAddress: email, IPAddress: ip,
-	}
-	if ident == nil {
-		// Recorded as a failure and answered as a success. The record is for
-		// the rate limit; the answer is so the caller learns nothing.
-		s.write(ctx, entry)
-		return nil
-	}
-
-	entry.Outcome = authlog.Succeeded
-
-	s.write(ctx, entry)
-
-	return s.deliver(ctx, ident, nil, KindPasswordReset, s.cfg.ResetTTL)
-}
-
-// ConfirmPasswordReset sets a new password from a reset link.
-func (s *Service) ConfirmPasswordReset(ctx context.Context, token, newPassword, ip string) error {
-	v, ident, err := s.redeem(ctx, token, KindPasswordReset)
-	if err != nil {
-		return err
-	}
-	if err := s.cfg.Policy.Check(ctx, newPassword); err != nil {
-		return err
-	}
-
-	if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
-		if err := s.storePassword(ctx, ident, newPassword); err != nil {
-			return err
-		}
-		consumed, err := s.consume(ctx, v)
-		if err != nil {
-			return err
-		}
-		if !consumed {
-			// Two requests raced for the same link and the other one won.
-			return rigerr.BadRequest("this link has already been used")
-		}
-		return nil
-	}); err != nil {
-		return err
-	}
-
-	// Every session, in every tenant. A reset happens because somebody has lost
-	// control of their account; ending only the sessions of the tenant the
-	// link was clicked from would leave whoever took it signed in to the others.
-	if err := s.revokeEverySession(ctx, ident.ID); err != nil {
-		return err
-	}
-
-	s.write(ctx, authlog.Entry{
-		Event: authlog.EventPasswordResetCompleted, Outcome: authlog.Succeeded,
-		EmailAddress: normalizeEmail(ident.EmailAddress), IPAddress: ip,
-	})
-	return nil
-}
-
-// ChangePasswordInput is a deliberate password change.
-type ChangePasswordInput struct {
-	TenantID  uuid.UUID
-	AccountID uuid.UUID
-
-	CurrentPassword string
-	NewPassword     string
-
-	Client    session.Client
-	IPAddress string
-	UserAgent string
-}
-
-// ChangePassword replaces a password for somebody who knows the old one, and
-// returns a fresh session.
-//
-// The old sessions are all revoked, including the one making the request, and a
-// new pair is issued in their place. Anything else forces a choice between
-// signing the person out of the tab they are looking at and leaving a thief
-// signed in on another continent.
-func (s *Service) ChangePassword(ctx context.Context, in ChangePasswordInput) (session.Pair, error) {
-	acct, ident, err := s.person(ctx, in.TenantID, in.AccountID)
-	if err != nil {
-		return session.Pair{}, err
-	}
-
-	cred, err := s.cfg.Store.Credential(ctx, ident.ID)
-	if err != nil {
-		return session.Pair{}, err
-	}
-	if cred == nil {
-		return session.Pair{}, rigerr.BadRequest(
-			"this account has no password yet; use the reset link to set one")
-	}
-
-	ok, _, err := s.cfg.Hasher.Verify(cred.PasswordHash, in.CurrentPassword)
-	if err != nil && !errors.Is(err, password.ErrMalformed) {
-		return session.Pair{}, err
-	}
-	if !ok {
-		return session.Pair{}, rigerr.Unauthorized("the current password is not correct")
-	}
-	if err := s.cfg.Policy.Check(ctx, in.NewPassword); err != nil {
-		return session.Pair{}, err
-	}
-	if err := s.storePassword(ctx, ident, in.NewPassword); err != nil {
-		return session.Pair{}, err
-	}
-	if err := s.revokeEverySession(ctx, ident.ID); err != nil {
-		return session.Pair{}, err
-	}
-
-	pair, err := s.cfg.Sessions.Issue(ctx, session.IssueInput{
-		TenantID:  acct.TenantID,
-		AccountID: acct.ID,
-		Client:    in.Client,
-		IPAddress: in.IPAddress,
-		UserAgent: in.UserAgent,
-	})
-	if err != nil {
-		return session.Pair{}, err
-	}
-
-	s.write(ctx, authlog.Entry{
-		Event: authlog.EventPasswordChanged, Outcome: authlog.Succeeded,
-		TenantID: &acct.TenantID, AccountID: &acct.ID,
-		EmailAddress: normalizeEmail(acct.EmailAddress),
-		IPAddress:    in.IPAddress, UserAgent: in.UserAgent,
-		TokenRootID: &pair.RootTokenID,
-	})
-	return pair, nil
 }
 
 // SendEmailVerification mints a confirmation link for the person behind an
@@ -969,7 +700,11 @@ func (s *Service) SendEmailVerification(ctx context.Context, tenantID, accountID
 		TenantID: &acct.TenantID, AccountID: &acct.ID,
 		EmailAddress: normalizeEmail(ident.EmailAddress),
 	})
-	return s.deliver(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
+	_, mail, err := s.deliver(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
+	if err != nil {
+		return err
+	}
+	return post(ctx, mail)
 }
 
 // VerifyEmail confirms an address from a link.
@@ -1067,49 +802,13 @@ func (s *Service) EndImpersonation(ctx context.Context, tok *session.Token) erro
 	return nil
 }
 
-// HasPassword reports whether a person has a password at all.
-//
-// Somebody who only ever signed in through a provider has none, and neither does
-// somebody who has been invited and not yet arrived. It is here so that a caller
-// setting a first password can tell the difference without reading the hash: an
-// application that fetched the credential to check would be an application
-// holding a hash it has no use for.
-func (s *Service) HasPassword(ctx context.Context, identityID uuid.UUID) (bool, error) {
-	cred, err := s.cfg.Store.Credential(ctx, identityID)
-	if err != nil {
-		return false, err
-	}
-	return cred != nil, nil
-}
-
-// SetPassword replaces a person's password without asking for the old one.
-//
-// It is for provisioning and for an administrator resetting somebody out of a
-// hole — not for a self-service change, which is [Service.ChangePassword].
-// Sessions are revoked either way, in every tenant.
-func (s *Service) SetPassword(ctx context.Context, identityID uuid.UUID, newPassword string) error {
-	ident, err := s.cfg.Store.FindIdentityByID(ctx, identityID)
-	if err != nil {
-		return err
-	}
-	if ident == nil {
-		return rigerr.NotFound("nobody with that identifier")
-	}
-	if err := s.cfg.Policy.Check(ctx, newPassword); err != nil {
-		return err
-	}
-	if err := s.storePassword(ctx, ident, newPassword); err != nil {
-		return err
-	}
-	return s.revokeEverySession(ctx, identityID)
-}
-
 // person resolves an account and the identity behind it.
 //
-// Every flow that touches a credential needs both: the account is what a caller
-// names and what a log entry records, and the identity is what the password
-// belongs to. A service account has no identity, and asking for its password is
-// a mistake worth naming rather than a nil to trip over later.
+// Every flow that is about the person rather than the membership needs both:
+// the account is what a caller names and what a log entry records, and the
+// identity is what an address belongs to. A service account has no identity, so
+// asking for one is a mistake worth naming rather than a nil to trip over
+// later.
 func (s *Service) person(ctx context.Context, tenantID, accountID uuid.UUID) (*Account, *Identity, error) {
 	acct, err := s.cfg.Store.FindByID(ctx, tenantID, accountID)
 	if err != nil {
@@ -1119,7 +818,7 @@ func (s *Service) person(ctx context.Context, tenantID, accountID uuid.UUID) (*A
 		return nil, nil, rigerr.NotFound("no account with that identifier")
 	}
 	if acct.IdentityID == nil {
-		return nil, nil, rigerr.BadRequest("a service account has no password; revoke its key instead")
+		return nil, nil, rigerr.BadRequest("a service account is not a person; revoke its key instead")
 	}
 
 	ident, err := s.cfg.Store.FindIdentityByID(ctx, *acct.IdentityID)
@@ -1135,12 +834,20 @@ func (s *Service) person(ctx context.Context, tenantID, accountID uuid.UUID) (*A
 	return acct, ident, nil
 }
 
-// revokeEverySession ends every session a person has, in every tenant they
+// RevokeEverySession ends every session a person has, in every tenant they
 // belong to.
 //
-// One password covers every tenant, so anything less would leave a thief signed
-// in to the tenants the person was not looking at when they changed it.
-func (s *Service) revokeEverySession(ctx context.Context, identityID uuid.UUID) error {
+// What "sign me out everywhere" means, and the only way to reach it: a person is
+// global and their sessions are not, so anything narrower leaves somebody signed
+// in to the tenants they were not looking at. [github.com/simonjanss/rig/auth/session.Manager.RevokeAll]
+// wants a tenant and an account, and finding every pair a person has is exactly
+// what this does.
+//
+// Exported because the decision to use it is an application's. rig calls it
+// nowhere: there is no credential left to change, and ending every session
+// because somebody signed in with a code would make the second device sign the
+// first one out.
+func (s *Service) RevokeEverySession(ctx context.Context, identityID uuid.UUID) error {
 	accts, err := s.cfg.Store.AccountsForIdentity(ctx, identityID)
 	if err != nil {
 		return err
@@ -1153,46 +860,26 @@ func (s *Service) revokeEverySession(ctx context.Context, identityID uuid.UUID) 
 	return nil
 }
 
-// storePassword hashes and saves.
-func (s *Service) storePassword(ctx context.Context, ident *Identity, plain string) error {
-	c, err := s.cfg.Hasher.Hash(plain)
-	if err != nil {
-		return err
-	}
-	id, err := uuid.NewV7()
-	if err != nil {
-		return fmt.Errorf("account: generate credential id: %w", err)
-	}
-
-	return s.cfg.Store.SaveCredential(ctx, &Credential{
-		ID:           id,
-		IdentityID:   ident.ID,
-		PasswordHash: c.Encoded,
-		Algorithm:    c.Algorithm,
-		Params:       c.Params,
-		CreatedAt:    s.now(),
-	})
-}
-
-// mintVerification creates a link and returns its token.
-func (s *Service) mintVerification(ctx context.Context, ident *Identity, tenantID *uuid.UUID, kind VerificationKind, ttl time.Duration) (string, error) {
-	token, hash, err := s.mintToken()
-	if err != nil {
-		return "", err
-	}
-	if _, err := s.newVerification(ctx, ident, tenantID, kind, ttl, hash); err != nil {
-		return "", err
-	}
-	return token, nil
-}
-
-// mintToken is the secret half: thirty-two random bytes, the hash that is stored,
-// and the plaintext that is not.
+// mintSecret is the plaintext a kind of row carries and the hash that is stored
+// in its place.
 //
 // It is separate from the row so that the queue can write the row now and make
-// the secret later — see [Outbox] for why a queued link cannot carry its own
-// token. The inline path is the two of them called together, which is what
+// the secret later — see [Outbox] for why a queued row cannot carry its own
+// secret. The inline path is the two called together, which is what
 // mintVerification is, so there is one code path rather than a copy.
+//
+// Two kinds of secret, and the switch is the whole of the difference between
+// them: a link carries a token nobody could guess, and a sign-in code carries
+// six digits somebody has to read out loud.
+func (s *Service) mintSecret(kind VerificationKind, ident *Identity) (secret string, hash []byte, err error) {
+	if kind == KindEmailCode {
+		return s.mintCode(ident)
+	}
+	return s.mintToken()
+}
+
+// mintToken is thirty-two random bytes, the hash that is stored, and the
+// plaintext that is not.
 func (s *Service) mintToken() (token string, hash []byte, err error) {
 	raw := make([]byte, tokenBytes)
 	if _, err := cryptorand.Read(raw); err != nil {
@@ -1202,12 +889,16 @@ func (s *Service) mintToken() (token string, hash []byte, err error) {
 	return tokenEncoding.EncodeToString(raw), sum[:], nil
 }
 
-// newVerification writes the link row.
+// newVerification writes the row.
 //
-// A nil hash is a link that has been queued and not yet sent: the secret does not
-// exist yet, and nothing can reach the row by token because every lookup is an
-// equality against token_hash and equality against NULL is never true.
-func (s *Service) newVerification(ctx context.Context, ident *Identity, tenantID *uuid.UUID, kind VerificationKind, ttl time.Duration, hash []byte) (*Verification, error) {
+// A nil hash is one that has been queued and not yet sent: the secret does not
+// exist yet, and nothing can reach the row by token because every lookup of that
+// shape is an equality against token_hash and equality against NULL is never
+// true.
+func (s *Service) newVerification(
+	ctx context.Context, ident *Identity, invite *pendingInvite,
+	kind VerificationKind, ttl time.Duration, hash []byte,
+) (*Verification, error) {
 	id, err := uuid.NewV7()
 	if err != nil {
 		return nil, fmt.Errorf("account: generate verification id: %w", err)
@@ -1215,13 +906,20 @@ func (s *Service) newVerification(ctx context.Context, ident *Identity, tenantID
 
 	now := s.now()
 	v := &Verification{
-		ID:                id,
-		IdentityID:        ident.ID,
-		InvitedToTenantID: tenantID,
-		Kind:              kind,
-		TokenHash:         hash,
-		CreatedAt:         now,
-		ExpiresAt:         now.Add(ttl),
+		ID:         id,
+		IdentityID: ident.ID,
+		Kind:       kind,
+		TokenHash:  hash,
+		CreatedAt:  now,
+		ExpiresAt:  now.Add(ttl),
+	}
+	if invite != nil {
+		tenantID, role := invite.TenantID, invite.Role
+		v.InvitedToTenantID = &tenantID
+		v.InvitedRole = &role
+		v.InvitedDisplayName = invite.DisplayName
+		v.InvitedByAccountID = invite.ByAccountID
+		v.InvitedByAPIKeyID = invite.ByAPIKeyID
 	}
 	if err := s.cfg.Store.CreateVerification(ctx, v); err != nil {
 		return nil, err
@@ -1229,32 +927,87 @@ func (s *Service) newVerification(ctx context.Context, ident *Identity, tenantID
 	return v, nil
 }
 
-// deliver is the one place the queued and inline paths differ, and every caller
-// that mints a link goes through it.
+// pendingMail is a secret that has been written and not yet handed to the
+// Notifier.
 //
-// acct is only read for an invitation, which is the one link that is about a
-// tenant rather than about a person.
-func (s *Service) deliver(ctx context.Context, ident *Identity, acct *Account, kind VerificationKind, ttl time.Duration) error {
-	var tenantID *uuid.UUID
-	if acct != nil {
-		id := acct.TenantID
-		tenantID = &id
-	}
+// It exists so that the send can happen after the caller's transaction rather
+// than inside it — see [Service.deliver] — and it is nil whenever there is
+// nothing for the caller to do.
+type pendingMail func(ctx context.Context) error
 
+// post hands pending mail to the Notifier, and is nothing at all when there is
+// none: the queued path sends from the dispatcher, and every caller of
+// [Service.deliver] ends in this line either way.
+func post(ctx context.Context, m pendingMail) error {
+	if m == nil {
+		return nil
+	}
+	return m(ctx)
+}
+
+// deliver is the one place the queued and inline paths differ, and every caller
+// that mints a secret goes through it.
+//
+// invite is set for an invitation and nil for everything else — it is the one
+// kind that is about a tenant rather than about a person, and it is what the
+// mail has to name. It carries no account, because on this path there is not
+// one yet: accepting is what creates it.
+//
+// It returns the row so that a caller can answer with what it wrote. An
+// invitation is the one that needs to — a listing row has to come back to
+// whoever sent it — and on the queued path the row is all there is, the secret
+// not existing until the dispatcher makes it.
+//
+// **It does not send.** What comes back with the row is the send, for the
+// caller to run once it has committed. The Notifier is the application's code
+// talking to somebody else's server, and the callers that mint a secret
+// replacing another one — [Service.freshCode] and [Service.Invite] — have to
+// revoke and mint in one transaction, so sending inside deliver would hold a
+// pool connection and an open transaction for as long as that server takes to
+// answer, with no timeout on this path at all. The queued path is where a
+// deadline lives, and there this returns nil: the dispatcher sends, under
+// [MailOptions.SendTimeout].
+//
+// The cost of the split is that a send which fails leaves a committed row
+// behind, where a send inside the transaction would have rolled it back. That
+// is the queued path's behaviour anyway, and it is the safe direction: minting
+// again supersedes what is there, so a retry is a retry rather than a conflict.
+func (s *Service) deliver(
+	ctx context.Context, ident *Identity, invite *pendingInvite, kind VerificationKind, ttl time.Duration,
+) (*Verification, pendingMail, error) {
 	if s.cfg.Outbox == nil {
-		token, err := s.mintVerification(ctx, ident, tenantID, kind, ttl)
+		secret, hash, err := s.mintSecret(kind, ident)
 		if err != nil {
-			return err
+			return nil, nil, err
 		}
-		return s.notify(ctx, kind, ident, acct, token)
+		v, err := s.newVerification(ctx, ident, invite, kind, ttl, hash)
+		if err != nil {
+			return nil, nil, err
+		}
+
+		// Read back rather than assembled, so that the mail is handed the same
+		// shape on both paths: the tenant's name comes from a join and this is
+		// the one place that has it. Read here and not in the send, because the
+		// row it reads is the one just written: outside the transaction it is
+		// not there yet.
+		var inv *Invitation
+		if kind == KindInvitation {
+			if inv, err = s.cfg.Store.InvitationByID(ctx, v.ID); err != nil {
+				return nil, nil, err
+			}
+		}
+		return v, func(ctx context.Context) error {
+			return s.notify(ctx, kind, ident, inv, secret)
+		}, nil
 	}
 
 	// Both writes together, and in the caller's transaction when there is one.
-	// A verification without its delivery is an orphan link nobody will ever
-	// mail — invisible, except as an invitation in a listing that was never
-	// sent. InTx is re-entrant, so this joins rather than nests.
-	return s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
-		v, err := s.newVerification(ctx, ident, tenantID, kind, ttl, nil)
+	// A verification without its delivery is an orphan nobody will ever mail —
+	// invisible, except as an invitation in a listing that was never sent. InTx
+	// is re-entrant, so this joins rather than nests.
+	var out *Verification
+	err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
+		v, err := s.newVerification(ctx, ident, invite, kind, ttl, nil)
 		if err != nil {
 			return err
 		}
@@ -1262,6 +1015,7 @@ func (s *Service) deliver(ctx context.Context, ident *Identity, acct *Account, k
 		if err != nil {
 			return fmt.Errorf("account: generate delivery id: %w", err)
 		}
+		out = v
 		return s.cfg.Outbox.Enqueue(ctx, &Delivery{
 			ID:             id,
 			VerificationID: v.ID,
@@ -1270,29 +1024,69 @@ func (s *Service) deliver(ctx context.Context, ident *Identity, acct *Account, k
 			DeliverAt:      s.now(),
 		})
 	})
-}
-
-// redeem resolves a link token to its row and the person it is for.
-//
-// Every failure looks the same to the caller. A link that expired, a link that
-// was already used, and a link somebody invented are all "this link is not
-// valid", because knowing which would tell an attacker whether they had guessed
-// a real one.
-func (s *Service) redeem(ctx context.Context, token string, kind VerificationKind) (*Verification, *Identity, error) {
-	invalid := rigerr.BadRequest("this link is not valid or has expired")
-
-	raw, err := tokenEncoding.DecodeString(strings.ToUpper(strings.TrimSpace(token)))
-	if err != nil || len(raw) != tokenBytes {
-		return nil, nil, invalid
-	}
-
-	sum := sha256.Sum256(raw)
-	v, err := s.cfg.Store.VerificationByHash(ctx, sum[:])
 	if err != nil {
 		return nil, nil, err
 	}
-	if v == nil || v.Kind != kind || !v.Usable(s.now()) {
-		return nil, nil, invalid
+	return out, nil, nil
+}
+
+// pendingInvite is what an invitation's row carries beyond the secret: the
+// tenant, the role, the name, and who asked.
+//
+// Its own type rather than four parameters, because they travel together
+// everywhere and three of the four are pointers — a call site with four
+// positional arguments of those shapes is a call site somebody transposes.
+type pendingInvite struct {
+	TenantID    uuid.UUID
+	Role        Role
+	DisplayName string
+	ByAccountID *uuid.UUID
+	ByAPIKeyID  *uuid.UUID
+}
+
+// errInvalidLink is the answer to every way a link can be wrong.
+//
+// A link that expired, one that was already used, and one somebody invented are
+// all the same sentence, because knowing which would tell an attacker whether
+// they had guessed a real one.
+var errInvalidLink = rigerr.BadRequest("this link is not valid or has expired")
+
+// redeem resolves a link token to its row and the person it is for.
+//
+// It reads and checks; consuming is the caller's, inside the transaction that
+// acts on what it found.
+func (s *Service) redeem(ctx context.Context, token string, kind VerificationKind) (*Verification, *Identity, error) {
+	v, ident, err := s.findByToken(ctx, token, kind)
+	if err != nil {
+		return nil, nil, err
+	}
+	if !v.Usable(s.now()) {
+		return nil, nil, errInvalidLink
+	}
+	return v, ident, nil
+}
+
+// findByToken is redeem without the usability check.
+//
+// The split exists for [Service.PreviewInvitation], which answers "what is this
+// link for" and must not act on it. Keeping the lookup here rather than copying
+// it is what stops the preview quietly acquiring the half that consumes: there
+// is one decoder, one hash, and one place that turns a secret into a row.
+//
+// It still refuses the wrong kind and an identity that is gone, because neither
+// is a state a caller can do anything sensible with.
+func (s *Service) findByToken(ctx context.Context, token string, kind VerificationKind) (*Verification, *Identity, error) {
+	hash, ok := tokenHash(token)
+	if !ok {
+		return nil, nil, errInvalidLink
+	}
+
+	v, err := s.cfg.Store.VerificationByHash(ctx, hash)
+	if err != nil {
+		return nil, nil, err
+	}
+	if v == nil || v.Kind != kind {
+		return nil, nil, errInvalidLink
 	}
 
 	ident, err := s.cfg.Store.FindIdentityByID(ctx, v.IdentityID)
@@ -1300,7 +1094,7 @@ func (s *Service) redeem(ctx context.Context, token string, kind VerificationKin
 		return nil, nil, err
 	}
 	if ident == nil {
-		return nil, nil, invalid
+		return nil, nil, errInvalidLink
 	}
 	return v, ident, nil
 }
@@ -1321,6 +1115,44 @@ func (s *Service) minDuration() time.Duration {
 		return s.cfg.MinDuration
 	}
 	return DefaultMinDuration
+}
+
+// tokenHash turns a presented token into the value stored in its place, and
+// reports whether it could be one at all.
+//
+// One decoder, because two places that have to agree about an encoding is one
+// place too many: [Service.findByToken] and [Service.PreviewInvitation] both
+// start here.
+func tokenHash(token string) ([]byte, bool) {
+	raw, err := tokenEncoding.DecodeString(strings.ToUpper(strings.TrimSpace(token)))
+	if err != nil || len(raw) != tokenBytes {
+		return nil, false
+	}
+	sum := sha256.Sum256(raw)
+	return sum[:], true
+}
+
+// MaskEmail hides most of an address while leaving it recognisable.
+//
+// "bo@school.example" becomes "b***@school.example". The domain is untouched,
+// deliberately: it is what tells somebody which of their addresses a link is
+// for, and it is usually the tenant's own domain, which whatever is showing this
+// has already named. A one-character local part becomes "*" rather than itself.
+//
+// Exported because an application rendering its own landing page should mask the
+// way rig does rather than invent a second format for the same field. What it is
+// for is [Service.PreviewInvitation]: the holder of an invitation link is not yet
+// proven to be its addressee, mail gets forwarded, and the unmasked form would
+// turn a leaked link into a confirmed address.
+func MaskEmail(address string) string {
+	local, domain, found := strings.Cut(strings.TrimSpace(address), "@")
+	if !found || local == "" {
+		return "***"
+	}
+	if len(local) == 1 {
+		return "*@" + domain
+	}
+	return local[:1] + "***@" + domain
 }
 
 // normalizeEmail is how an address is compared and counted.

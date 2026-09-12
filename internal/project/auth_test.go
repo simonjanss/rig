@@ -52,8 +52,10 @@ func TestAuthDefaultsAreResolved(t *testing.T) {
 		}
 	}
 
-	if a.Password.MinLength != 12 || a.Password.MaxLength != 1024 {
-		t.Errorf("password policy = %+v", a.Password)
+	// The code block is off, so none of it is resolved: a block nobody turned on
+	// should read as unfinished rather than as defaulted.
+	if a.EmailCode != (project.AuthEmailCode{}) {
+		t.Errorf("email_code should be untouched while disabled: %+v", a.EmailCode)
 	}
 	if a.Limits.LoginByEmail.Max != 5 || a.Limits.LoginByEmail.Window.Duration() != 15*time.Minute {
 		t.Errorf("login_by_email = %+v", a.Limits.LoginByEmail)
@@ -165,9 +167,9 @@ func TestAuthLogRetentionAgainstTheLimits(t *testing.T) {
 			auth: "auth:\n  enabled: true\n  log_retention: 90d\n",
 		},
 		{
-			name:    "shorter than the default password-reset window",
+			name:    "shorter than the default code-request window",
 			auth:    "auth:\n  enabled: true\n  log_retention: 15m\n",
-			wantErr: "auth.limits.password_reset",
+			wantErr: "auth.limits.email_code_request",
 		},
 		{
 			name: "shorter than a window the project itself widened",
@@ -322,9 +324,9 @@ func TestAuthIRCarriesEveryConfiguredValue(t *testing.T) {
 
 	p, diags := project.Parse("rig.yaml", []byte(minimal+
 		"auth:\n  enabled: true\n  base_path: /identity\n"+
-		"  allow_registration: true\n  require_verified_email: true\n"+
+		"  require_verified_email: true\n"+
 		"  session:\n    access_ttl: 90s\n"+
-		"  password:\n    breach_check: true\n"+
+		"  email_code:\n    enabled: true\n    allow_provisioning: true\n"+
 		"  trusted_proxies: [10.0.0.0/8]\n"+
 		"  tenant:\n    from: [host, hook]\n"+
 		"  oauth:\n    base_url: https://app.example.com\n    state_ttl: 4m\n"+
@@ -340,14 +342,20 @@ func TestAuthIRCarriesEveryConfiguredValue(t *testing.T) {
 	if a.BasePath != "/identity" {
 		t.Errorf("base_path = %q", a.BasePath)
 	}
-	if !a.AllowRegistration || !a.RequireVerifiedEmail || a.AllowTenantCreation {
+	if !a.RequireVerifiedEmail || a.AllowTenantCreation {
 		t.Errorf("flags wrong: %+v", a)
 	}
 	if a.Session.AccessTTL.Duration() != 90*time.Second {
 		t.Errorf("access_ttl = %s", a.Session.AccessTTL)
 	}
-	if !a.Password.BreachCheck {
-		t.Error("breach_check should carry through")
+	if !a.EmailCode.Enabled || !a.EmailCode.AllowProvisioning {
+		t.Errorf("email_code = %+v", a.EmailCode)
+	}
+	// Resolved rather than left at zero, which is the IR's own rule: a zero in
+	// it means somebody wrote a zero.
+	if a.EmailCode.Length != 6 || a.EmailCode.TTL.Duration() != 10*time.Minute ||
+		a.EmailCode.MaxAttempts != 3 {
+		t.Errorf("email_code defaults not resolved: %+v", a.EmailCode)
 	}
 	if !a.Tenant.Uses(ir.TenantFromHost) || !a.Tenant.Uses(ir.TenantFromHook) {
 		t.Errorf("tenant sources = %v", a.Tenant.Sources)
@@ -392,5 +400,75 @@ func TestDurationRejectsNonsense(t *testing.T) {
 		"auth:\n  enabled: true\n  session:\n    access_ttl: soon\n"))
 	if !diags.HasErrors() {
 		t.Fatal("\"soon\" is not a duration")
+	}
+}
+
+// The code flow's two numbers are only safe together, which is why there is a
+// check about the pair rather than two checks about the fields.
+func TestAuthEmailCodeValidation(t *testing.T) {
+	t.Parallel()
+
+	for _, c := range []struct {
+		name, auth string
+		wantErr    string
+	}{
+		{
+			name: "the defaults are accepted",
+			auth: "auth:\n  enabled: true\n  email_code:\n    enabled: true\n",
+		},
+		{
+			name: "configured and never enabled",
+			auth: "auth:\n  enabled: true\n  email_code:\n    ttl: 5m\n",
+			// The same failure a whole auth block configured and left off gets:
+			// every value in it would be silently unread.
+			wantErr: "auth.email_code is configured but not enabled",
+		},
+		{
+			name:    "a window nobody could read a mail inside",
+			auth:    "auth:\n  enabled: true\n  email_code:\n    enabled: true\n    ttl: 30s\n",
+			wantErr: "nobody can open a mail and type a code inside a minute",
+		},
+		{
+			name:    "a code left in a mailbox all afternoon",
+			auth:    "auth:\n  enabled: true\n  email_code:\n    enabled: true\n    ttl: 4h\n",
+			wantErr: "live credential sitting in a",
+		},
+		{
+			// Six digits and a hundred attempts is exactly 1 in 10000, which is
+			// the boundary and is allowed.
+			name: "the boundary is allowed",
+			auth: "auth:\n  enabled: true\n  email_code:\n    enabled: true\n" +
+				"    length: 6\n    max_attempts: 100\n",
+		},
+		{
+			name: "one attempt too many for six digits",
+			auth: "auth:\n  enabled: true\n  email_code:\n    enabled: true\n" +
+				"    length: 6\n    max_attempts: 101\n",
+			wantErr: "chance of guessing one code",
+		},
+		{
+			// Eight digits carry a hundred times more slack, so the same
+			// ceiling that is refused above is fine here. That relationship is
+			// the whole reason the check is about the pair.
+			name: "more digits buy more attempts",
+			auth: "auth:\n  enabled: true\n  email_code:\n    enabled: true\n" +
+				"    length: 8\n    max_attempts: 101\n",
+		},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, diags := project.Parse("rig.yaml", []byte(minimal+c.auth))
+			switch {
+			case c.wantErr == "" && diags.HasErrors():
+				t.Fatalf("%s should be accepted:\n%s", c.name, diags.String())
+			case c.wantErr == "":
+				return
+			case !diags.HasErrors():
+				t.Fatalf("%s should be refused", c.name)
+			case !strings.Contains(diags.String(), c.wantErr):
+				t.Errorf("expected a message naming %q:\n%s", c.wantErr, diags.String())
+			}
+		})
 	}
 }

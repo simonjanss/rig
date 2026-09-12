@@ -20,31 +20,48 @@ const (
 // The events the standard limits count. They match the auth log's event names,
 // which is what lets the log double as the rate-limit substrate.
 const (
-	EventLoginFailed          = "LoginFailed"
-	EventLoginSucceeded       = "LoginSucceeded"
-	EventPasswordResetRequest = "PasswordResetRequested"
-	EventVerificationResent   = "VerificationResent"
-	EventTokenRefreshed       = "TokenRefreshed"
-	EventAPIKeyAuthFailed     = "ApiKeyAuthFailed"
-	EventAPIKeyAuthSucceeded  = "ApiKeyAuthSucceeded"
+	EventLoginFailed         = "LoginFailed"
+	EventLoginSucceeded      = "LoginSucceeded"
+	EventEmailCodeRequested  = "EmailCodeRequested"
+	EventVerificationResent  = "VerificationResent"
+	EventTokenRefreshed      = "TokenRefreshed"
+	EventAPIKeyAuthFailed    = "ApiKeyAuthFailed"
+	EventAPIKeyAuthSucceeded = "ApiKeyAuthSucceeded"
+	EventInvitationPreviewed = "InvitationPreviewed"
 )
 
 // Defaults are the limits a project starts with.
 //
 // The login pair is the reason this package exists in the shape it does. An
 // email-only limit lets one attacker lock a victim out of their own account by
-// failing on purpose; an IP-only limit lets a botnet spray one password across
+// failing on purpose; an IP-only limit lets a botnet spray one guess across
 // every address it knows. So there are two, deliberately mismatched: the email
 // threshold is tight, and the IP threshold is loose enough that an office
 // behind one NAT does not trip it on a Monday morning.
 type Defaults struct {
-	// LoginByEmail locks one account after a handful of wrong passwords.
+	// LoginByEmail locks one account after a handful of wrong codes.
 	LoginByEmail Limit
 	// LoginByIP throttles one source spraying many accounts.
 	LoginByIP Limit
 
-	PasswordReset      Limit
+	// EmailCodeRequest bounds how often one address may be mailed a code.
+	EmailCodeRequest Limit
+	// EmailCodeByIP bounds how many codes one source may ask for, across every
+	// address.
+	//
+	// The pair again, and the asymmetry is the same one — but this is the limit
+	// that matters most, because with provisioning on, asking for a code writes
+	// a person. Without it one script makes ten thousand identities.
+	EmailCodeByIP Limit
+
 	VerificationResend Limit
+
+	// InvitationPreview bounds reading an invitation link, which is the one
+	// unauthenticated endpoint keyed by a secret rather than by an address.
+	// Nothing clears it: what it bounds is one source walking the token space,
+	// and a preview that found something is as much evidence of that as one
+	// that did not.
+	InvitationPreview Limit
 
 	// Refresh bounds one session's rotations. A client refreshing sixty times
 	// a minute is looping, not working.
@@ -73,10 +90,26 @@ func Standard() Defaults {
 			Max:    50,
 			Window: 15 * time.Minute,
 		},
-		PasswordReset: Limit{
-			Name:   "password.reset",
-			Event:  EventPasswordResetRequest,
+		EmailCodeRequest: Limit{
+			Name:   "emailcode.request",
+			Event:  EventEmailCodeRequested,
 			Max:    5,
+			Window: time.Hour,
+		},
+		EmailCodeByIP: Limit{
+			Name:  "emailcode.ip",
+			Event: EventEmailCodeRequested,
+			// Not cleared by anything, and the counted event is not a failure:
+			// what is being bounded is how many codes one place may ask for,
+			// and a code that was delivered counts as much as one that was not.
+			//
+			// Loose, for the reason LoginByIP is loose: a shared office is one
+			// address, and thirty people arriving on a Monday would trip
+			// anything tighter. It is still a hard ceiling on how fast one
+			// source can make identities when provisioning is on — which is
+			// what this limit is for — and the per-address limit beside it is
+			// the tight one.
+			Max:    100,
 			Window: time.Hour,
 		},
 		VerificationResend: Limit{
@@ -100,17 +133,27 @@ func Standard() Defaults {
 			Max:       20,
 			Window:    time.Minute,
 		},
+		InvitationPreview: Limit{
+			Name:  "invitation.preview",
+			Event: EventInvitationPreviewed,
+			Max:   60,
+			// An hour rather than longer, and the reason is elsewhere:
+			// LongestWindow feeds the retention check, so a window past an hour
+			// would make somebody's existing auth.log_retention invalid for a
+			// limit they never configured.
+			Window: time.Hour,
+		},
 	}
 }
 
-// All is the six limits, in a slice.
+// All is every limit, in a slice.
 //
 // For anything that has to reason about the set rather than pick one out of it —
 // documenting them, or checking a retention window against them.
 func (d Defaults) All() []Limit {
 	return []Limit{
-		d.LoginByEmail, d.LoginByIP, d.PasswordReset,
-		d.VerificationResend, d.Refresh, d.APIKeyFailures,
+		d.LoginByEmail, d.LoginByIP, d.EmailCodeRequest, d.EmailCodeByIP,
+		d.VerificationResend, d.Refresh, d.APIKeyFailures, d.InvitationPreview,
 	}
 }
 

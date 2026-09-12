@@ -1,6 +1,6 @@
 // Package auth is the authentication foundation, assembled.
 //
-// The packages under it are the parts: password hashing, session issue and
+// The packages under it are the parts: session issue and
 // rotation, API keys, permission resolution, the endpoints, and the Postgres
 // stores behind all of them. Each is separately usable and separately testable,
 // and putting them together is the same fifteen lines in every project.
@@ -23,7 +23,7 @@
 // generated package declares, so a project with no authentication does not
 // depend on this module to serve a table.
 //
-// That is a working login, logout, refresh, password reset, email verification,
+// That is a working sign-in, logout, refresh, email verification,
 // session list and API key endpoint, over the tables `rig setup-project` wrote,
 // with lockout and rate limits counted in the database. Nothing about it is
 // generated and nothing about it is yours to maintain.
@@ -55,7 +55,6 @@ import (
 	"github.com/simonjanss/rig/auth/authpg"
 	"github.com/simonjanss/rig/auth/handoff"
 	"github.com/simonjanss/rig/auth/oauth"
-	"github.com/simonjanss/rig/auth/password"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/cache"
 	"github.com/simonjanss/rig/runtime/httpx"
@@ -85,14 +84,14 @@ type Config struct {
 	//
 	// Replace it with whatever your deployment actually uses — a subdomain, a
 	// path segment, a claim in a proxy's header. It is consulted only where a
-	// tenant cannot be known some other way: login, a password reset, the OAuth
+	// tenant cannot be known some other way: a sign-in, a code request, the OAuth
 	// start. Once there is a session the tenant comes from the token.
 	//
 	// uuid.Nil is an ordinary answer at every one of those places and means
 	// "unspecified" rather than "none": a single sign-in page cannot know which
 	// tenants an address belongs to before somebody has proved they own it, so
 	// the sign-in resolves it afterwards. That is true of a provider sign-in as
-	// well as a password one — a header is not there when a provider sends the
+	// well as a code one — a header is not there when a provider sends the
 	// browser back, so a header-based deployment answers Nil at the OAuth start
 	// and the callback settles it. Which is why the default answers Nil for a
 	// missing header rather than refusing; see [TenantFromHeader].
@@ -139,24 +138,27 @@ type Config struct {
 	// remember, and no write path that can be left out.
 	Cache CacheOptions
 
-	// Policy is the password policy. The zero value is a minimum length of 12
-	// and no composition rules, which is current advice.
-	Policy password.Policy
+	// EmailCode is the mailed-code sign-in: rig sends a short numeric code to an
+	// address and somebody types it back.
+	//
+	// Off by default, and it is the way in for anybody with no account at a
+	// configured provider — which in most deployments is most people. [New]
+	// refuses it with no Notifier, because a code nobody receives is a door
+	// nobody can open.
+	//
+	// See [github.com/simonjanss/rig/auth/account.EmailCodeOptions].
+	EmailCode EmailCodeOptions
 
-	// BreachChecker is consulted when somebody sets a password. Nil skips the
-	// check. password.HIBP is a k-anonymity client for haveibeenpwned that fails
-	// open, which is the right way round: a network problem should not stop
-	// somebody changing their password.
-	BreachChecker password.BreachChecker
-
-	// Notifier sends the mail a flow needs — a reset link, a verification link,
-	// an invitation.
+	// Notifier sends the mail a flow needs — a sign-in code, a verification
+	// link, an invitation.
 	//
 	// Nil means none is sent, and it means that silently: account.NoNotifier is
-	// substituted and returns success from every method, so in production nobody
-	// can reset a password and nothing anywhere says so. Set one. (The one
-	// combination that is refused is Mail.Queue with no notifier, which would
-	// write rows nothing could ever send.)
+	// substituted and returns success from every method, so in production
+	// nobody can confirm an address and nothing anywhere says so. Set one. (Two
+	// combinations are refused rather than dropped: Mail.Queue with no
+	// notifier, which would write rows nothing could ever send, and EmailCode
+	// with no notifier, which would be the only door minting codes into a
+	// void.)
 	Notifier account.Notifier
 
 	// Mail is the queue for those links: off by default, and turning it on means
@@ -174,7 +176,7 @@ type Config struct {
 	Mail MailOptions
 
 	// RequireVerifiedEmail refuses a sign-in until the address is verified —
-	// a password and a provider alike, since linking a provider account
+	// a code and a provider alike, since linking a provider account
 	// requires a verified address and records it as one.
 	//
 	// It does not refuse a registration. The address is one request old there
@@ -232,27 +234,27 @@ type Config struct {
 	// optional; the zero value lets anybody signed in make one called anything.
 	Tenants account.TenantOptions
 
-	// AllowRegistration mounts POST /auth/register, where a stranger creates an
-	// account with no tenant and lands in the picker.
-	//
-	// Off by default. Whether anybody may sign themselves up is a product
-	// decision — invite-only and open registration are both ordinary — and rig
-	// declines to pick one. Off means the route does not exist, rather than
-	// answering 403 to something that is there.
-	AllowRegistration bool
-
-	// OnRegistered runs inside the transaction that creates a self-registered
-	// identity, and an error rolls the sign-up back. The ordinary body is
-	// accounts.Provision with Invite set — an application that starts every
-	// newcomer in a demo or sandbox tenant leaves an invitation waiting in the
-	// picker they land in. Nil registers the person and nothing else.
+	// OnRegistered runs inside the transaction that creates somebody rig has
+	// never seen — asking for a sign-in code with a new address, where
+	// EmailCode.AllowProvisioning allows it — and an error rolls the whole thing
+	// back. The ordinary body is accounts.Provision into a starter tenant, or
+	// accounts.Invite to leave one waiting in the picker they land in. Nil
+	// creates the person and nothing else.
 	//
 	// See [github.com/simonjanss/rig/auth/account.Config.OnRegistered].
 	OnRegistered func(ctx context.Context, accounts *account.Service, in account.Registered) error
 
+	// OnJoined runs inside the transaction that accepts an invitation, after the
+	// account exists and before the session is issued, and an error rolls the
+	// acceptance back. It is where a new member's roles and rows are seeded:
+	// accepting is called by rig's own handler, so this is the caller's line.
+	//
+	// See [github.com/simonjanss/rig/auth/account.Config.OnJoined].
+	OnJoined func(ctx context.Context, in account.Joined) error
+
 	// Limits override the rate limits. The zero value is the documented set: 5
-	// failed logins per address per 15 minutes, 50 per address range, 5 password
-	// resets an hour, and so on.
+	// failed sign-ins per address per 15 minutes, 50 per address range, 5 code
+	// requests an hour, and so on.
 	Limits throttle.Defaults
 
 	// LogRetention is how long an entry in rig_auth_log is kept, and it is only
@@ -354,7 +356,7 @@ type OAuth struct {
 	// than the only way: nil selects one of two built-in endings.
 	//
 	// Without [OAuth.Browser] that is [authhttp.Handler.SignIn], which issues a
-	// session and answers with the same body a login does — right for curl and
+	// session and answers with the same body a sign-in does — right for curl and
 	// for a native client, and nothing a browser that has just followed a
 	// redirect can act on. With one it is
 	// [authhttp.Handler.SignInToBrowser], which leaves the tokens in a
@@ -369,7 +371,7 @@ type OAuth struct {
 	// [oauth.SignIn.TenantID] is uuid.Nil whenever [Config.Tenant] answered Nil
 	// at the start, and issuing a session straight from that field would issue
 	// one into a tenant that does not exist. The default handles it by answering
-	// the way a login does — an identity token and the tenant list, so the
+	// the way a sign-in does — an identity token and the tenant list, so the
 	// picker can take over.
 	OnSignIn func(w http.ResponseWriter, r *http.Request, in oauth.SignIn) error
 
@@ -449,6 +451,47 @@ func (m MailOptions) options() account.MailOptions {
 	}
 }
 
+// EmailCodeOptions is the mailed-code sign-in.
+//
+// A local mirror of [github.com/simonjanss/rig/auth/account.EmailCodeOptions],
+// the way [MailOptions] is of the queue's — this file is the one struct an
+// application fills in, and reaching two packages down to configure a sign-in
+// would make it two.
+type EmailCodeOptions struct {
+	// Enabled turns the flow on and mounts its two routes. Off means they do not
+	// exist rather than answering 403.
+	Enabled bool
+
+	// Length is how many digits, and defaults to six. Six to ten are accepted:
+	// shorter is guessable whatever the attempt ceiling, and longer is a token,
+	// which belongs in a link.
+	Length int
+	// TTL is how long a code lasts, and defaults to ten minutes.
+	TTL time.Duration
+	// MaxAttempts is how many wrong guesses kill a code, and defaults to three
+	// — deliberately below the five wrong sign-ins that lock an address, so
+	// that mistyping a code is recoverable. It is a ceiling on one code rather
+	// than a rate limit on an address, and the two are not substitutes.
+	MaxAttempts int
+
+	// AllowProvisioning sends a code to an address rig has never seen, creating
+	// the person when the code is asked for. Off by default, which makes the
+	// deployment invite-only; on, it is self-registration, and OnRegistered is
+	// the hook that decides where a newcomer lands.
+	AllowProvisioning bool
+}
+
+// options is the account package's shape of the same numbers.
+func (e EmailCodeOptions) options() account.EmailCodeOptions {
+	return account.EmailCodeOptions{
+		Enabled:           e.Enabled,
+		Length:            e.Length,
+		TTL:               e.TTL,
+		MaxAttempts:       e.MaxAttempts,
+		AllowProvisioning: e.AllowProvisioning,
+	}
+}
+
 // Auth is the assembled foundation.
 type Auth struct {
 	endpoints *authhttp.Handler
@@ -519,7 +562,7 @@ func New(cfg Config) (*Auth, error) {
 	bus := newCacheBus(cfg)
 
 	// Counted in the database rather than in memory, so two replicas cannot
-	// disagree about how many times a password has been tried and a restart does
+	// disagree about how many times a code has been tried and a restart does
 	// not clear somebody's lockout.
 	limits := resolvedLimits(cfg)
 	limiter := throttle.New(throttle.NewPostgres(cfg.Pool, throttle.PostgresConfig{}))
@@ -554,7 +597,7 @@ func New(cfg Config) (*Auth, error) {
 		OnRotate: cfg.OnSessionRefresh,
 		Now:      cfg.Now,
 
-		// The same limiter the login limits use, over the same log. A session
+		// The same limiter the sign-in limits use, over the same log. A session
 		// refreshing sixty times a minute is a client looping.
 		Limiter:      limiter,
 		RefreshLimit: limits.Refresh,
@@ -563,21 +606,14 @@ func New(cfg Config) (*Auth, error) {
 		return nil, fmt.Errorf("auth: sessions: %w", err)
 	}
 
-	// The policy carries the breach check, and account.New fills in the hashing
-	// parameters and the minimum length when they are zero — so this passes what
-	// was chosen and leaves the rest to the package that owns the decision.
-	policy := cfg.Policy
-	if policy.Breached == nil {
-		policy.Breached = cfg.BreachChecker
-	}
-
 	accounts, err := account.New(account.Config{
 		Store:                stores.Accounts,
 		Sessions:             sessions,
 		Identities:           identities,
 		Tenants:              cfg.Tenants,
 		OnRegistered:         cfg.OnRegistered,
-		Policy:               policy,
+		OnJoined:             cfg.OnJoined,
+		EmailCode:            cfg.EmailCode.options(),
 		Log:                  stores.Log,
 		Notifier:             cfg.Notifier,
 		Outbox:               mailOutbox(cfg, stores),
@@ -647,7 +683,7 @@ func New(cfg Config) (*Auth, error) {
 		// The same store the twenty writers write to, handed over as a reader.
 		// One table, two contracts, and no second place for the trail to be.
 		AuditLog:            stores.Log,
-		AllowRegistration:   cfg.AllowRegistration,
+		AllowEmailCode:      cfg.EmailCode.Enabled,
 		AllowTenantCreation: cfg.AllowTenantCreation,
 		BasePath:            base,
 		OnError:             cfg.OnError,
@@ -720,7 +756,7 @@ func New(cfg Config) (*Auth, error) {
 
 		if signIn == nil {
 			// The same session every other endpoint issues, answered in the same
-			// shape a login is — including when there is no tenant to land in,
+			// shape a sign-in is — including when there is no tenant to land in,
 			// which is what makes it a default rather than a guess. It can be
 			// one because the question a provider sign-in cannot answer before
 			// the redirect is the same question a login answers after the

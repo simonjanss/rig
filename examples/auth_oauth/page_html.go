@@ -116,7 +116,7 @@ const pageHTML = `<!doctype html>
         </p>
         <p class="note">
           Try it three ways. Sign in as a new address and you join this tenant. Sign
-          in as <code>ada@acme.test</code> — who already has a password here — with
+          in as <code>ada@acme.test</code> — who already exists here — with
           <b>verified</b> on, and the provider is linked to that account. Turn
           verified off and it is refused, because otherwise whoever registers your
           address anywhere owns your account here.
@@ -154,7 +154,7 @@ const pageHTML = `<!doctype html>
   <div class="panel">
     <h2>Signed in{{with .Who}} — {{.}}{{end}}</h2>
     <p class="note">
-      An ordinary session: the same pair a password login issues, so everything
+      An ordinary session: the same pair every other sign-in issues, so everything
       downstream is identical. The bookmarks below come from this application's own
       API, called with a real <code>Authorization</code> header.
     </p>

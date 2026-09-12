@@ -1,10 +1,12 @@
 package project
 
 import (
+	"math"
 	"net/netip"
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/simonjanss/rig/internal/diag"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -41,11 +43,7 @@ func (p *Project) checkAuth() diag.List {
 	diags.Append(p.checkAuthTenant(a.Tenant))
 	diags.Append(p.checkAuthSession(a.Session))
 
-	if a.Password.MinLength > a.Password.MaxLength {
-		diags.Add(diag.CodeConfigInvalid, p.At("auth", "password", "min_length"),
-			"auth.password.min_length (%d) is above max_length (%d), so no password is acceptable",
-			a.Password.MinLength, a.Password.MaxLength)
-	}
+	diags.Append(p.checkAuthEmailCode(a))
 
 	for i, cidr := range a.TrustedProxies {
 		if _, err := netip.ParsePrefix(cidr); err != nil {
@@ -113,16 +111,69 @@ func (l AuthLimits) LongestWindow() (ir.Duration, string) {
 	}{
 		{"login_by_email", l.LoginByEmail},
 		{"login_by_ip", l.LoginByIP},
-		{"password_reset", l.PasswordReset},
+		{"email_code_request", l.EmailCodeRequest},
+		{"email_code_ip", l.EmailCodeByIP},
 		{"verification_resend", l.VerificationResend},
 		{"refresh", l.Refresh},
 		{"api_key_failures", l.APIKeyFailures},
+		{"invitation_preview", l.InvitationPreview},
 	} {
 		if limit.limit.Window.Duration() > longest.Duration() {
 			longest, key = limit.limit.Window.IR(), limit.key
 		}
 	}
 	return longest, key
+}
+
+// checkAuthEmailCode refuses a code nobody could safely use, and a block
+// somebody configured and never turned on.
+//
+// The cross-field check is the one that earns its keep. Length and max_attempts
+// are meaningless apart: four digits with five attempts is one guess in two
+// thousand, which is not a credential, and the schema cannot express a
+// relationship. The threshold is one in ten thousand — with the default six
+// digits that allows up to a hundred attempts, and with four it allows none,
+// which is the honest answer to a four-digit code.
+func (p *Project) checkAuthEmailCode(a Auth) diag.List {
+	var diags diag.List
+	c := a.EmailCode
+
+	if !c.Enabled {
+		// Values in a block nobody turned on would be silently unread, which is
+		// the same failure checkAuth refuses for the whole auth block.
+		if c.Length != 0 || c.TTL != 0 || c.MaxAttempts != 0 || c.AllowProvisioning {
+			diags.Add(diag.CodeConfigInvalid, p.At("auth", "email_code", "enabled"),
+				"auth.email_code is configured but not enabled, so none of it is read "+
+					"and the sign-in routes are not mounted; set `enabled: true` or "+
+					"remove the block")
+		}
+		return diags
+	}
+
+	if c.TTL.Duration() < time.Minute {
+		diags.Add(diag.CodeConfigInvalid, p.At("auth", "email_code", "ttl"),
+			"auth.email_code.ttl is %s, and nobody can open a mail and type a code "+
+				"inside a minute", c.TTL)
+	}
+	if c.TTL.Duration() > time.Hour {
+		diags.Add(diag.CodeConfigInvalid, p.At("auth", "email_code", "ttl"),
+			"auth.email_code.ttl is %s, and a code is a live credential sitting in a "+
+				"mailbox for that long; keep it under an hour", c.TTL)
+	}
+
+	// The guess probability for one code, which is what the pair actually
+	// decides. Computed rather than compared against a table so that the
+	// diagnostic can say the number.
+	space := math.Pow10(c.Length)
+	if odds := float64(c.MaxAttempts) / space; odds > 1e-4 {
+		diags.Add(diag.CodeConfigInvalid, p.At("auth", "email_code", "max_attempts"),
+			"auth.email_code.max_attempts (%d) against length (%d) is a 1 in %.0f chance "+
+				"of guessing one code, and the two are only safe together: keep it under "+
+				"1 in 10000, by allowing fewer attempts or asking for more digits",
+			c.MaxAttempts, c.Length, 1/odds)
+	}
+
+	return diags
 }
 
 func (p *Project) checkAuthTenant(t AuthTenant) diag.List {
@@ -297,20 +348,23 @@ func (a Auth) IR() *ir.Auth {
 			RotationLeeway: a.Session.RotationLeeway.IR(),
 			IdentityTTL:    a.Session.IdentityTTL.IR(),
 		},
-		Password: ir.AuthPassword{
-			MinLength:   a.Password.MinLength,
-			MaxLength:   a.Password.MaxLength,
-			BreachCheck: a.Password.BreachCheck,
+		EmailCode: ir.AuthEmailCode{
+			Enabled:           a.EmailCode.Enabled,
+			Length:            a.EmailCode.Length,
+			TTL:               a.EmailCode.TTL.IR(),
+			MaxAttempts:       a.EmailCode.MaxAttempts,
+			AllowProvisioning: a.EmailCode.AllowProvisioning,
 		},
 		Limits: ir.AuthLimits{
 			LoginByEmail:       a.Limits.LoginByEmail.IR(),
 			LoginByIP:          a.Limits.LoginByIP.IR(),
-			PasswordReset:      a.Limits.PasswordReset.IR(),
+			EmailCodeRequest:   a.Limits.EmailCodeRequest.IR(),
+			EmailCodeByIP:      a.Limits.EmailCodeByIP.IR(),
 			VerificationResend: a.Limits.VerificationResend.IR(),
 			Refresh:            a.Limits.Refresh.IR(),
 			APIKeyFailures:     a.Limits.APIKeyFailures.IR(),
+			InvitationPreview:  a.Limits.InvitationPreview.IR(),
 		},
-		AllowRegistration:    a.AllowRegistration,
 		AllowTenantCreation:  a.AllowTenantCreation,
 		RequireVerifiedEmail: a.RequireVerifiedEmail,
 		TrustedProxies:       slices.Clone(a.TrustedProxies),

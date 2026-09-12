@@ -50,7 +50,6 @@ func (h *Handler) provision(w http.ResponseWriter, r *http.Request) {
 		TimeZone:     in.TimeZone,
 		ByAccountID:  claims.Actor(),
 		ByAPIKeyID:   claims.ActorKey(),
-		Invite:       in.Invite,
 	})
 	if err != nil {
 		h.fail(w, r, err)

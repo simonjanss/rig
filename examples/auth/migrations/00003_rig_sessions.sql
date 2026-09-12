@@ -81,9 +81,7 @@ CREATE TYPE rig_auth_event AS ENUM (
     'Logout',
     'TokenRefreshed',
     'TokenReuseDetected',
-    'PasswordResetRequested',
-    'PasswordResetCompleted',
-    'PasswordChanged',
+    'EmailCodeRequested',
     'EmailVerified',
     'VerificationResent',
     'ApiKeyAuthSucceeded',
@@ -94,6 +92,7 @@ CREATE TYPE rig_auth_event AS ENUM (
     'AccountProvisioned',
     'InvitationSent',
     'InvitationAccepted',
+    'InvitationPreviewed',
     'InvitationRevoked',
     'TenantSwitched'
 );

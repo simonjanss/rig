@@ -21,28 +21,27 @@ import (
 // counts, so a limit and the trail it reads cannot disagree about what an
 // event is called.
 const (
-	EventLoginAttempted         = "LoginAttempted"
-	EventLoginSucceeded         = "LoginSucceeded"
-	EventLoginFailed            = "LoginFailed"
-	EventAccountLocked          = "AccountLocked"
-	EventLogout                 = "Logout"
-	EventTokenRefreshed         = "TokenRefreshed"
-	EventTokenReuseDetected     = "TokenReuseDetected"
-	EventPasswordResetRequested = "PasswordResetRequested"
-	EventPasswordResetCompleted = "PasswordResetCompleted"
-	EventPasswordChanged        = "PasswordChanged"
-	EventEmailVerified          = "EmailVerified"
-	EventVerificationResent     = "VerificationResent"
-	EventAPIKeyAuthSucceeded    = "ApiKeyAuthSucceeded"
-	EventAPIKeyAuthFailed       = "ApiKeyAuthFailed"
-	EventImpersonationStarted   = "ImpersonationStarted"
-	EventImpersonationEnded     = "ImpersonationEnded"
-	EventOAuthSignIn            = "OAuthSignIn"
-	EventAccountProvisioned     = "AccountProvisioned"
-	EventInvitationSent         = "InvitationSent"
-	EventInvitationAccepted     = "InvitationAccepted"
-	EventInvitationRevoked      = "InvitationRevoked"
-	EventTenantSwitched         = "TenantSwitched"
+	EventLoginAttempted       = "LoginAttempted"
+	EventLoginSucceeded       = "LoginSucceeded"
+	EventLoginFailed          = "LoginFailed"
+	EventAccountLocked        = "AccountLocked"
+	EventLogout               = "Logout"
+	EventTokenRefreshed       = "TokenRefreshed"
+	EventTokenReuseDetected   = "TokenReuseDetected"
+	EventEmailCodeRequested   = "EmailCodeRequested"
+	EventEmailVerified        = "EmailVerified"
+	EventVerificationResent   = "VerificationResent"
+	EventAPIKeyAuthSucceeded  = "ApiKeyAuthSucceeded"
+	EventAPIKeyAuthFailed     = "ApiKeyAuthFailed"
+	EventImpersonationStarted = "ImpersonationStarted"
+	EventImpersonationEnded   = "ImpersonationEnded"
+	EventOAuthSignIn          = "OAuthSignIn"
+	EventAccountProvisioned   = "AccountProvisioned"
+	EventInvitationSent       = "InvitationSent"
+	EventInvitationAccepted   = "InvitationAccepted"
+	EventInvitationPreviewed  = "InvitationPreviewed"
+	EventInvitationRevoked    = "InvitationRevoked"
+	EventTenantSwitched       = "TenantSwitched"
 )
 
 // Events is every event this package can write.
@@ -61,9 +60,7 @@ func Events() []string {
 		EventLogout,
 		EventTokenRefreshed,
 		EventTokenReuseDetected,
-		EventPasswordResetRequested,
-		EventPasswordResetCompleted,
-		EventPasswordChanged,
+		EventEmailCodeRequested,
 		EventEmailVerified,
 		EventVerificationResent,
 		EventAPIKeyAuthSucceeded,
@@ -74,6 +71,7 @@ func Events() []string {
 		EventAccountProvisioned,
 		EventInvitationSent,
 		EventInvitationAccepted,
+		EventInvitationPreviewed,
 		EventInvitationRevoked,
 		EventTenantSwitched,
 	}
