@@ -59,6 +59,11 @@ const (
 	// declared here. Listed for the reason the examples are — so that every port
 	// a suite in this repository takes is allocated from one list.
 	PortS3MinIO = 55446
+	// PortRigTest is the database rigtest's own suite runs against, and it is
+	// the third exception, for the same reason as the second: rigtest is
+	// published and cannot import this package, so the number lives in
+	// rigtest/postgres_docker_test.go and is only declared here.
+	PortRigTest = 55447
 	// PortIdempotency is internal/idemtest, where two transactions contend for
 	// one key. Its own container because the contention is the test: a suite
 	// sharing a database with one that holds locks of its own would fail as a
@@ -130,6 +135,7 @@ var ports = map[string]int{
 	"examples/linearlite (electric)":    PortExampleLinearliteElectric,
 	"internal/filestest":                PortFiles,
 	"rigs3 (minio)":                     PortS3MinIO,
+	"rigtest":                           PortRigTest,
 	"internal/idemtest":                 PortIdempotency,
 	"internal/throttletest":             PortThrottle,
 	"internal/electrictest (sync)":      PortElectricSync,

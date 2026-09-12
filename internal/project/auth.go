@@ -52,6 +52,22 @@ func (p *Project) checkAuth() diag.List {
 		}
 	}
 
+	// An entry that matches nothing is worse than no list, because the list is
+	// still on and the domain somebody meant to allow is not in it. Both of
+	// these are silently skipped by the matcher rather than refusing everybody,
+	// so nothing downstream would ever say so.
+	for i, domain := range a.AllowedIdentityDomains {
+		switch d := strings.TrimSpace(strings.TrimPrefix(strings.TrimSpace(domain), "@")); {
+		case d == "":
+			diags.Add(diag.CodeConfigInvalid, p.At("auth", "allowed_identity_domains", itoa(i)),
+				"auth.allowed_identity_domains[%d] is empty, and an empty entry matches nothing", i)
+		case strings.ContainsAny(d, "@/ "):
+			diags.Add(diag.CodeConfigInvalid, p.At("auth", "allowed_identity_domains", itoa(i)),
+				"auth.allowed_identity_domains[%d]: %q is not a domain — write example.com, "+
+					"not an address or a URL", i, domain)
+		}
+	}
+
 	diags.Append(p.checkAuthRetention(a))
 	diags.Append(p.checkAuthOAuth(a))
 	return diags
@@ -365,10 +381,11 @@ func (a Auth) IR() *ir.Auth {
 			APIKeyFailures:     a.Limits.APIKeyFailures.IR(),
 			InvitationPreview:  a.Limits.InvitationPreview.IR(),
 		},
-		AllowTenantCreation:  a.AllowTenantCreation,
-		RequireVerifiedEmail: a.RequireVerifiedEmail,
-		TrustedProxies:       slices.Clone(a.TrustedProxies),
-		LogRetention:         a.LogRetention.IR(),
+		AllowTenantCreation:    a.AllowTenantCreation,
+		RequireVerifiedEmail:   a.RequireVerifiedEmail,
+		AllowedIdentityDomains: slices.Clone(a.AllowedIdentityDomains),
+		TrustedProxies:         slices.Clone(a.TrustedProxies),
+		LogRetention:           a.LogRetention.IR(),
 	}
 
 	for _, source := range a.Tenant.From {

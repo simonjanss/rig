@@ -42,17 +42,29 @@ import (
 
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/auth/oauthtest"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/api"
 	"github.com/simonjanss/rig/examples/auth_oauth/internal/store"
 	"github.com/simonjanss/rig/examples/auth_oauth/services/bookmark"
-	"github.com/simonjanss/rig/examples/idp"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/runtime/serve"
 )
 
 //go:embed migrations/*.sql
 var migrations embed.FS
+
+// demoProvider is what this example's stand-in provider calls itself.
+//
+// It is a constant here rather than in auth/oauthtest because the name is this
+// example's to choose and this example's to pay for: oauth.Provider.Name is
+// written into rig_identity_oauth.provider, which is a Postgres enum owned by
+// every project's own migrations. So this line and
+// migrations/00005_demo_oauth_provider.sql are one decision, and adding Okta
+// or Auth0 starts the same way — a migration, not a line of configuration.
+// oauthtest.Wear over one of rig's built-in providers needs neither, because
+// Google, Microsoft and GitHub are already labels of that enum.
+const demoProvider = "Demo"
 
 // migrationSources is every set this example applies, in the order they go.
 //
@@ -177,15 +189,15 @@ func newAPI(ctx context.Context, pool *pgxpool.Pool, base string, log *slog.Logg
 		return api.Parts{}, err
 	}
 	var (
-		demo  *idp.Server
+		demo  *oauthtest.Server
 		extra []oauth.Provider
 	)
 	if len(live) == 0 {
 		// It registers the origins it will redirect back to, because a real
 		// provider does, and a stand-in that skipped the check would be teaching
 		// the wrong lesson.
-		demo = idp.New(origins...)
-		extra = []oauth.Provider{demo.Provider()}
+		demo = oauthtest.New(origins...)
+		extra = []oauth.Provider{demo.Custom(demoProvider)}
 		live = extra
 	}
 	announce(live, origins)
@@ -340,9 +352,9 @@ func announce(live []oauth.Provider, origins []string) {
 	}
 	fmt.Printf("sign-in providers: %s\n", strings.Join(names, ", "))
 
-	if len(live) == 1 && live[0].Name == idp.Name {
+	if len(live) == 1 && live[0].Name == demoProvider {
 		fmt.Printf("  %s is a stand-in this example serves itself; set GOOGLE_CLIENT_ID "+
-			"and GOOGLE_CLIENT_SECRET (or the MICROSOFT_ pair) to use a real one\n", idp.Name)
+			"and GOOGLE_CLIENT_SECRET (or the MICROSOFT_ pair) to use a real one\n", demoProvider)
 		return
 	}
 

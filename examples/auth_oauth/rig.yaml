@@ -77,7 +77,7 @@ auth:
     insecure: true
 
     # Credentials are named, not carried. Set a pair and that provider appears;
-    # set none and the stand-in in examples/idp appears instead, which is what
+    # set none and the stand-in from rig/auth/oauthtest appears instead, which is what
     # makes this example work the moment it is cloned.
     providers:
       - name: google

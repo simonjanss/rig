@@ -60,6 +60,12 @@ auth:
   allow_tenant_creation: true
   require_verified_email: true
 
+  # Who may become a person here at all, which is not the same question as a
+  # tenant's own allowed_email_domains: that one is about holding an account in
+  # one tenant, and an ordinary sign-in names no tenant to read it from. An
+  # invitation is allowed whatever this says.
+  allowed_identity_domains: [example.com, example.org]
+
   limits:
     login_by_email: {max: 3, window: 10m}
     login_by_ip: {max: 40, window: 15m}

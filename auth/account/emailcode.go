@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -211,6 +212,36 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 		entry.Detail = map[string]any{"reason": "no such address"}
 		s.write(ctx, entry)
 		return nil
+	}
+
+	// The gate, beside the door rather than inside the transaction below. Two
+	// reasons, and the second is the one that would have been found late: an
+	// application's rule may read something over a network, and holding a
+	// Postgres transaction open for it is a lock held on somebody else's
+	// latency — and a refusal escaping the InTx closure would have to be told
+	// apart from a real failure to be swallowed, which is a sentinel nobody
+	// would remember to keep working.
+	//
+	// Swallowed it must be. This endpoint answers 204 to every address, so that
+	// holding one does not tell a stranger whether somebody here has it, and a
+	// gate that refused out loud would be a way to ask.
+	if ident == nil {
+		if err := identity.Allow(ctx, s.cfg.AllowIdentity, identity.Candidate{
+			EmailAddress: in.EmailAddress,
+			// Written out rather than left to the zero value, because it is a
+			// decision rather than an omission: the identity is created when the
+			// code is asked for, not when it is typed back, so nobody has proved
+			// this address yet. A gate that insisted on a verified one here would
+			// close this door for everybody.
+			EmailVerified: false,
+			DisplayName:   displayNameFor(in.EmailAddress),
+			Via:           identity.SourceEmailCode,
+		}); err != nil {
+			entry.Outcome = authlog.Failed
+			entry.Detail = map[string]any{"reason": "refused by AllowIdentity: " + err.Error()}
+			s.write(ctx, entry)
+			return nil
+		}
 	}
 
 	if ident != nil {

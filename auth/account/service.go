@@ -37,6 +37,7 @@ import (
 	"github.com/simonjanss/rig/runtime/outbox"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -112,6 +113,21 @@ type Config struct {
 	// a name may be, and what else a new one needs. Every field is optional; the
 	// zero value lets anybody signed in make one called anything.
 	Tenants TenantOptions
+
+	// AllowIdentity decides whether somebody nobody here has ever heard of may
+	// become an identity. Nil admits everybody the doors above already let
+	// through, which is what this package did before it existed.
+	//
+	// It is the same gate [github.com/simonjanss/rig/auth/oauth.Config] holds,
+	// and one value is meant to be given to both: the question is about the
+	// person rather than about how they are arriving, and a deployment with a
+	// rule per door is a deployment that acquires an ungated one the next time a
+	// door is added.
+	//
+	// See [github.com/simonjanss/rig/auth/identity.Gate] for the contract,
+	// which is the part worth reading before writing one: it is asked about
+	// strangers and nobody else.
+	AllowIdentity identity.Gate
 
 	// OnRegistered runs inside the transaction that creates a person rig has
 	// never seen — asking for a sign-in code with a new address, where

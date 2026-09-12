@@ -30,6 +30,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/simonjanss/rig/auth/authlog"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/runtime/rigerr"
 )
 
@@ -268,6 +269,18 @@ type Config struct {
 	// is set.
 	AllowProvisioning bool
 
+	// AllowIdentity decides whether a particular stranger may become an
+	// identity, where AllowProvisioning decides whether any may. Both are asked
+	// and both must agree: nil here keeps this package's behaviour exactly as it
+	// was, and a gate does not open a door AllowProvisioning has shut.
+	//
+	// It is the same gate account.Config holds, and one value is meant to be
+	// given to both — "may this person become somebody here?" is not an OAuth
+	// question, and a rule per door is a door without a rule the next time one
+	// is added. See
+	// [github.com/simonjanss/rig/auth/identity.Gate] for the contract.
+	AllowIdentity identity.Gate
+
 	// AllowJoining creates an account in the tenant a sign-in named, for
 	// somebody who is not in it yet. Nil follows [Config.AllowProvisioning],
 	// which is what one switch did when it gated both doors.
@@ -425,7 +438,7 @@ func New(cfg Config) (*Handler, error) {
 // Declared here rather than imported for the reason the error writer below
 // reaches rigerr rather than httpx: httpx reaches runtime/throttle and the
 // Postgres driver behind it, and an application that mounts these two routes —
-// or, like `examples/idp`, only names this package's provider types — should
+// or, like `auth/oauthtest`, only names this package's provider types — should
 // not be linking that for one method name.
 type Router interface {
 	HandleFunc(pattern string, handler func(http.ResponseWriter, *http.Request))
@@ -627,6 +640,26 @@ func (h *Handler) identity(ctx context.Context, p Provider, profile Profile) (*L
 			Reason: ReasonNoAccount,
 			Err:    rigerr.Forbidden("there is no account for this address"),
 		}
+	}
+	// And then the application's own rule, about this person rather than about
+	// strangers in general. It is asked here and nowhere earlier, which is what
+	// makes its contract worth stating: everything above this line has already
+	// been admitted, so an application writes the domain rule and not a chain of
+	// exceptions for people it has met.
+	//
+	// ReasonNoAccount for both, deliberately. Reason is a closed set an
+	// application maps to its own copy, and "we will not have you" against "we
+	// are not taking anybody" is a distinction a sign-in page cannot act on
+	// differently — while the hook's own sentence, which is the part somebody
+	// can act on, reaches the ending either way.
+	if err := identity.Allow(ctx, h.cfg.AllowIdentity, identity.Candidate{
+		EmailAddress:  profile.EmailAddress,
+		EmailVerified: profile.EmailVerified,
+		DisplayName:   profile.DisplayName,
+		Via:           identity.SourceProvider,
+		Provider:      p.Name,
+	}); err != nil {
+		return nil, false, &Failure{Reason: ReasonNoAccount, Err: err}
 	}
 	link, err = h.cfg.Store.ProvisionIdentity(ctx, ProvisionInput{Provider: p.Name, Profile: profile})
 	if err != nil {

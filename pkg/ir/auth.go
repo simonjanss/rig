@@ -30,6 +30,14 @@ type Auth struct {
 	// RequireVerifiedEmail refuses a sign-in until the address is verified.
 	RequireVerifiedEmail bool `json:"require_verified_email"`
 
+	// AllowedIdentityDomains are the domains a stranger's address must be in to
+	// become a person here. Empty, which is the default, restricts nobody.
+	//
+	// omitempty, so that a project without one leaves the document exactly as it
+	// was — this key arriving would otherwise rewrite every golden IR for a
+	// setting none of them uses.
+	AllowedIdentityDomains []string `json:"allowed_identity_domains,omitempty"`
+
 	// TrustedProxies are the CIDR ranges whose X-Forwarded-For may be believed.
 	// Empty means none, and an address is then read from the connection.
 	TrustedProxies []string `json:"trusted_proxies,omitempty"`

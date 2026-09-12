@@ -93,6 +93,13 @@
           "type": "boolean",
           "description": "Refuse a sign-in until the address has been verified."
         },
+        "allowed_identity_domains": {
+          "items": {
+            "type": "string"
+          },
+          "type": "array",
+          "description": "Domains a stranger's address must be in to become a person here, for example example.com. A listed domain matches its subdomains. Empty, the default, restricts nobody. Not the same as a tenant's allowed_email_domains: this decides whether somebody may exist in this deployment at all, and an invitation is allowed whatever it says."
+        },
         "trusted_proxies": {
           "items": {
             "type": "string"

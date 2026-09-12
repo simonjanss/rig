@@ -617,6 +617,12 @@ And one that writes a subcommand:
 |---|---|
 | `log_retention` | How long an authentication log entry is kept, for example `90d`. Absent keeps everything. Setting it writes an `AuthLogPruner` task into your API package, and refuses a window shorter than the longest rate-limit window — those limits are counted from that table ([auth.md](auth.md#retention)). |
 
+And one that is a rule rather than a number:
+
+| Key | |
+|---|---|
+| `allowed_identity_domains` | Domains a stranger's address must be in to become a person here, for example `[example.com]`. A listed domain matches its subdomains. Empty, the default, restricts nobody. It applies to every door at once — a provider sign-in and a mailed code — and an invitation or a provision is allowed whatever it says, because somebody already here typed that address in. Not the same as a tenant's own `allowed_email_domains`, which is about holding an account in one tenant ([auth.md](auth.md#who-may-become-a-person)). |
+
 ---
 
 ## The whole file

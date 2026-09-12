@@ -23,7 +23,7 @@ import (
 // `rig generate` records it in .rig/revision.json, which is committed.
 //
 // Empty when the project has never generated with a revision recorded.
-const Revision = "2026-09-11"
+const Revision = "2026-09-12"
 
 // RevisionHeader carries the revision in both directions: what the caller was
 // built against on the way in, what this server was generated from on the way

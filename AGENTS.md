@@ -80,7 +80,7 @@ tree, `make tidy` produced the change: commit it.
 Each of these runs per module — the repository is a Go workspace, and `./...`
 names one module's packages and nothing else. `make check` is a list of those
 per-module targets and nothing more: a target that ran `./...` once and called
-it "everything" would quietly skip ten modules out of eleven.
+it "everything" would quietly skip eleven modules out of twelve.
 
 ## The ones that need Docker
 
@@ -90,8 +90,8 @@ make examples      # check all five examples for drift and run them for real
 ```
 
 `make test-docker` covers `.`, `runtime`, `auth`, `authmodel`, `files`,
-`notify`, `observe`, `presence`, `migrate`, `rigclient` and `rigs3`. All of it
-wants Postgres except `rigs3`, which wants MinIO.
+`notify`, `observe`, `presence`, `migrate`, `rigclient`, `rigs3` and `rigtest`.
+All of it wants Postgres except `rigs3`, which wants MinIO.
 Most of it starts its own Postgres on a port of its own and cleans up after
 itself. The `migrate` module is the exception: it expects a database at
 `localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
@@ -273,7 +273,7 @@ approved once per clone.
 ## Godoc
 
 `runtime/`, `auth/`, `authmodel/`, `files/`, `notify/`, `observe/`, `presence/`,
-`migrate/`, `rigclient/` and `rigs3/` are separate modules
+`migrate/`, `rigclient/`, `rigs3/` and `rigtest/` are separate modules
 that a generated application imports, and `pkg/` is the root module's own
 published surface — the IR and the generator interface, which is what somebody
 writing a generator against rig imports. Their godoc is the only documentation
@@ -309,7 +309,7 @@ and reads fine where it is. Nothing catches this, so after a rename:
 
 ```bash
 grep -rn '^\s*//.*\[[A-Z][A-Za-z0-9_]*\.[a-z][A-Za-z0-9_]*\]' --include='*.go' \
-  runtime auth files notify observe presence migrate rigclient rigs3
+  runtime auth files notify observe presence migrate rigclient rigs3 rigtest
 ```
 
 **A doc on a `const (` block covers every name in it**, so the block is where a
@@ -335,7 +335,7 @@ number. Propose a release, name the version you would use, and wait.
 **What makes one necessary.** Merging to main releases nothing. Until a release,
 a change to a published module's exported surface — `runtime`, `auth`,
 `authmodel`, `files`, `migrate`, `notify`, `observe`, `presence`, `rigclient`,
-`rigs3` —
+`rigs3`, `rigtest` —
 or to what a generator emits is invisible to everyone outside this repository.
 So the question is never "is main ahead of the last tag", it is "is somebody
 waiting for something that is only on main".
@@ -349,7 +349,7 @@ waiting for something that is only on main".
 
 There is no v1 until the Go surface is meant to be stable, and that is a
 decision to raise rather than take: from v2 on, Go requires the major in the
-import path, so every one of the eleven modules would need a `/v2` suffix and every
+import path, so every one of the twelve modules would need a `/v2` suffix and every
 generated import in every user's project would change.
 
 **Rehearse a first-of-anything with a prerelease.** `v0.4.0-rc.1` is not what
@@ -359,7 +359,7 @@ part rather than the code in it.
 
 **Four things never to do.** Move or delete a published tag. Release from a
 branch. Hand-edit a version in a `go.mod` or a `package.json` — that is `make
-release`'s job, and doing it by hand is how the eleven drift apart. Add an
+release`'s job, and doing it by hand is how the twelve drift apart. Add an
 `NPM_TOKEN`; publishing is tokenless by design and a secret appearing in the
 release workflow means somebody misread it.
 
@@ -369,8 +369,8 @@ that has grown a `replace` back.
 
 ### How
 
-Eleven modules, one version, one commit. `make release VERSION=v0.1.0` rewrites
-every intra-repository requirement to that version, commits, and creates eleven
+Twelve modules, one version, one commit. `make release VERSION=v0.1.0` rewrites
+every intra-repository requirement to that version, commits, and creates twelve
 tags: `v0.1.0` for the root module and `runtime/v0.1.0`, `auth/v0.1.0` and so on
 for the rest, which is how Go names a version of a module in a subdirectory.
 `make release-dry VERSION=v0.1.0` prints it without writing it.
@@ -379,7 +379,7 @@ for the rest, which is how Go names a version of a module in a subdirectory.
 `notify`, `presence` and `runtime` — it embeds their foundation schemas and
 generates imports against them. A rig released at a different number from the
 runtime it generates against is a rig that produces code nobody can build, so
-the eleven numbers are one number.
+the twelve numbers are one number.
 
 **No published module may `replace` a sibling.** `go install pkg@version`
 refuses a module whose `go.mod` carries one, and a consumer resolving a

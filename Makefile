@@ -23,18 +23,18 @@ export RIG_DB_ISOLATE := $(CURDIR)
 # vulnerability scanning and the Docker suite run over the first group only:
 # the examples are mostly generated output, and their Docker tests are already
 # run by `make examples`, which brings each example's own database up first.
-CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3
+CORE_MODULES    := . ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3 ./rigtest
 
 # linearlite names api/ rather than its own directory: it is the one example
 # with two halves, so rig.yaml sits above a Go module in api/ and a front end in
 # web/. Getting this wrong is quiet rather than loud — see the note on the
 # `examples` target below.
-EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/idp ./examples/linearlite/api ./examples/sdk
+EXAMPLE_MODULES := ./examples/todo ./examples/fantasyfootball ./examples/auth ./examples/auth_oauth ./examples/linearlite/api ./examples/sdk
 
 # The core modules less the root: the ones a generated application imports, so
 # their godoc is the documentation for a Go surface somebody depends on rather
 # than commentary on it.
-PUBLIC_MODULES  := ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3
+PUBLIC_MODULES  := ./runtime ./auth ./authmodel ./files ./notify ./observe ./presence ./migrate ./rigclient ./rigs3 ./rigtest
 
 # Everything godoc-check reads: the modules above, plus `pkg/` — the root
 # module's own published surface, which is what somebody writing a generator

@@ -1,10 +1,10 @@
 // Command release prepares a lockstep release of every published rig module.
 //
-// rig is eleven modules in one repository, and they are not independent: the
+// rig is twelve modules in one repository, and they are not independent: the
 // binary links auth, files, migrate, notify, presence and runtime, and it
 // generates code that imports them. A rig that generates against a runtime API
 // released under a different number is a rig nobody can use, so there is one
-// version for all eleven, and one commit that sets it everywhere.
+// version for all twelve, and one commit that sets it everywhere.
 //
 // What this does, in order:
 //
@@ -83,7 +83,7 @@ const releaseWorkflow = "release.yaml"
 const usage = `usage: make release VERSION=v0.1.0     (or: go run ./internal/release <version>)
        make release-dry VERSION=v0.1.0
 
-Cuts one version across all eleven published Go modules and all three npm
+Cuts one version across all twelve published Go modules and all three npm
 packages: rewrites every intra-repository requirement, sets the package.json
 versions, commits, and tags.
 
@@ -318,7 +318,7 @@ push, release the fix as the next patch version rather than moving %s.
 // The order is the whole point, and it is not tidiness. GitHub creates no push
 // event for a batch of more than three tags, and `release.yaml` triggers on
 // `v*` — so `git push origin --tags`, which is what this command used to print,
-// sends all eleven at once and fires nothing. The tags land, the release looks
+// sends all twelve at once and fires nothing. The tags land, the release looks
 // done, and there are no binaries, no GitHub release and nothing on npm. That
 // is what happened to v0.2.0, which had to be superseded by v0.2.1 to get a
 // build.

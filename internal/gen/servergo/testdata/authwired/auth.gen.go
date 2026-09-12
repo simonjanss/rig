@@ -25,6 +25,7 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
 	"github.com/simonjanss/rig/auth/handoff"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -129,6 +130,24 @@ type Hooks struct {
 	// because that part is the same everywhere and getting it half right leaves a
 	// tenant nobody can reach.
 	Tenants account.TenantOptions
+
+	// AllowIdentity decides whether somebody nobody here has ever heard of may
+	// become an identity, and it is the one gate on that question: every path that
+	// would create a person asks it — a provider sign-in, a mailed code, an
+	// invitation and a direct provision alike. So this deployment cannot acquire
+	// an ungated door by turning on a sign-in method it did not have before.
+	//
+	// It is asked about strangers and nobody else. By the time it runs rig has
+	// established that the address has no provider link and no identity of its
+	// own, so an existing member — and somebody adding a second provider to an
+	// account they already have — have both been admitted without consulting it.
+	// Write one rule, not a chain of them.
+	//
+	// Leave it nil and rig uses auth.allowed_identity_domains from rig.yaml, which
+	// is "example.com", "example.org". Setting this replaces that rule wholesale
+	// rather than adding to it: two rules merged is a rule nobody can read. Call
+	// identity.DomainAllowed from inside your own gate if you want both.
+	AllowIdentity identity.Gate
 
 	// OnRegistered runs inside the transaction that creates somebody rig has never
 	// seen — asking for a sign-in code with a new address — and an error rolls
@@ -458,6 +477,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 
 		AllowTenantCreation:  true,
 		RequireVerifiedEmail: true,
+		AllowIdentity:        allowIdentity(h),
 		Tenants:              h.Tenants,
 		OnRegistered:         h.OnRegistered,
 		OnJoined:             h.OnJoined,
@@ -684,6 +704,22 @@ func limits() throttle.Defaults {
 	d.APIKeyFailures.Max, d.APIKeyFailures.Window = 20, time.Minute
 	d.InvitationPreview.Max, d.InvitationPreview.Window = 30, time.Hour
 	return d
+}
+
+// allowIdentity is the gate on who may become a person here.
+//
+// auth.allowed_identity_domains in rig.yaml is sugar over the same hook rather
+// than a mechanism beside it, so it is a Gate like any other — and a hook
+// the application set wins wholesale. Merging the two would mean a refusal
+// nobody could trace to a rule.
+//
+// An administrator is not asked: an invitation or a provision goes through
+// whatever the list says, because somebody already here typed that address in.
+func allowIdentity(h Hooks) identity.Gate {
+	if h.AllowIdentity != nil {
+		return h.AllowIdentity
+	}
+	return identity.AllowDomains("example.com", "example.org")
 }
 
 // AuthLogPruner deletes authentication log entries older than 90d, which is

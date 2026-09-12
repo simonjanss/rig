@@ -48,6 +48,7 @@ import (
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/apikey"
 	"github.com/simonjanss/rig/auth/oauth"
+	"github.com/simonjanss/rig/auth/oauthtest"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/examples/auth/internal/api"
 	"github.com/simonjanss/rig/examples/auth/internal/store"
@@ -55,7 +56,6 @@ import (
 	"github.com/simonjanss/rig/examples/auth/services/note"
 	"github.com/simonjanss/rig/examples/auth/services/outbox"
 	"github.com/simonjanss/rig/examples/auth/web"
-	"github.com/simonjanss/rig/examples/idp"
 	"github.com/simonjanss/rig/migrate"
 	"github.com/simonjanss/rig/notify"
 	"github.com/simonjanss/rig/runtime/dbx"
@@ -65,6 +65,18 @@ import (
 
 //go:embed migrations/*.sql
 var migrations embed.FS
+
+// demoProvider is what this example's stand-in provider calls itself.
+//
+// It is a constant here rather than in auth/oauthtest because the name is this
+// example's to choose and this example's to pay for: oauth.Provider.Name is
+// written into rig_identity_oauth.provider, which is a Postgres enum owned by
+// every project's own migrations. So this line and
+// migrations/00013_demo_oauth_provider.sql are one decision, and adding Okta
+// or Auth0 starts the same way — a migration, not a line of configuration.
+// oauthtest.Wear over one of rig's built-in providers needs neither, because
+// Google, Microsoft and GitHub are already labels of that enum.
+const demoProvider = "Demo"
 
 // localDSN is what `rig db url` prints for this project.
 //
@@ -253,22 +265,22 @@ func newAPI(
 	// example's own and appears only when no real credentials were set, so the
 	// button works the moment the repository is cloned.
 	//
-	// The prop is shared with examples/auth_oauth rather than copied — one OAuth
-	// server, so the two demonstrations cannot drift into exercising different
-	// flows. It is not a mock: single-use authorization codes, PKCE verified at
-	// the token endpoint, and a consent screen that lets you choose whether it
-	// says the address is verified.
+	// The prop is rig's own — auth/oauthtest, the same one its suites run on, so
+	// the two demonstrations cannot drift into exercising different flows. It is
+	// not a mock: single-use authorization codes, PKCE verified at the token
+	// endpoint, and a consent screen that lets you choose whether it says the
+	// address is verified.
 	live, err := api.ConfiguredProviders(api.OAuthHooks{})
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	var (
-		demo  *idp.Server
+		demo  *oauthtest.Server
 		extra []oauth.Provider
 	)
 	if len(live) == 0 {
-		demo = idp.New(base)
-		extra = []oauth.Provider{demo.Provider()}
+		demo = oauthtest.New(base)
+		extra = []oauth.Provider{demo.Custom(demoProvider)}
 	}
 
 	// Declared before New because the sign-in hook closes over it: finishing a

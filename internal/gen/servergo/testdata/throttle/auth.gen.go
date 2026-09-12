@@ -24,6 +24,7 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/oauth"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/rigerr"
@@ -128,6 +129,23 @@ type Hooks struct {
 	// because that part is the same everywhere and getting it half right leaves a
 	// tenant nobody can reach.
 	Tenants account.TenantOptions
+
+	// AllowIdentity decides whether somebody nobody here has ever heard of may
+	// become an identity, and it is the one gate on that question: every path that
+	// would create a person asks it — a provider sign-in, a mailed code, an
+	// invitation and a direct provision alike. So this deployment cannot acquire
+	// an ungated door by turning on a sign-in method it did not have before.
+	//
+	// It is asked about strangers and nobody else. By the time it runs rig has
+	// established that the address has no provider link and no identity of its
+	// own, so an existing member — and somebody adding a second provider to an
+	// account they already have — have both been admitted without consulting it.
+	// Write one rule, not a chain of them.
+	//
+	// Nil, the default, refuses nobody — the doors above are then the whole of
+	// it. auth.allowed_identity_domains in rig.yaml is the declarative form, and
+	// it generates one of these.
+	AllowIdentity identity.Gate
 
 	// OnRegistered runs inside the transaction that creates somebody rig has never
 	// seen — asking for a sign-in code with a new address — and an error rolls
@@ -445,6 +463,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 
 		AllowTenantCreation:  true,
 		RequireVerifiedEmail: true,
+		AllowIdentity:        allowIdentity(h),
 		Tenants:              h.Tenants,
 		OnRegistered:         h.OnRegistered,
 		OnJoined:             h.OnJoined,
@@ -652,6 +671,11 @@ func limits() throttle.Defaults {
 	d.InvitationPreview.Max, d.InvitationPreview.Window = 30, time.Hour
 	return d
 }
+
+// allowIdentity is the gate on who may become a person here, and with no
+// auth.allowed_identity_domains in rig.yaml it is whatever the application
+// passed — nil included, which refuses nobody.
+func allowIdentity(h Hooks) identity.Gate { return h.AllowIdentity }
 
 // AuthLogPruner deletes authentication log entries older than 90d, which is
 // `auth.log_retention` in rig.yaml.
