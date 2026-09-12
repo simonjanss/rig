@@ -44,6 +44,7 @@ func (e *authEmitter) authFile() (gen.Artifact, error) {
 	e.configFunc(b)
 	e.tenantFunc(b)
 	e.limitsFunc(b)
+	e.allowIdentityFunc(b)
 	e.prunerFunc(b)
 	e.mailDispatcherFunc(b)
 	if e.oauth() != nil {
@@ -319,6 +320,8 @@ func (e *authEmitter) hooks(b *gobuf.Buf) {
 		b.L("Tenants %s.TenantOptions", account)
 		b.NL()
 	}
+
+	e.allowIdentityHook(b)
 
 	if a.EmailCode.Enabled && a.EmailCode.AllowProvisioning {
 		b.Comment("OnRegistered runs inside the transaction that creates somebody " +
@@ -848,6 +851,7 @@ func (e *authEmitter) configFunc(b *gobuf.Buf) {
 
 	b.L("AllowTenantCreation: %t,", a.AllowTenantCreation)
 	b.L("RequireVerifiedEmail: %t,", a.RequireVerifiedEmail)
+	b.L("AllowIdentity: allowIdentity(h),")
 	if a.AllowTenantCreation {
 		b.L("Tenants: h.Tenants,")
 	}
@@ -1291,6 +1295,86 @@ func (e *authEmitter) limitsFunc(b *gobuf.Buf) {
 			pair.field, pair.field, pair.limit.Max, genutil.GoDuration(b, pair.limit.Window))
 	}
 	b.L("return d")
+	b.L("}")
+	b.NL()
+}
+
+// allowIdentityHook emits the Hooks field.
+//
+// Unconditional, unlike OnRegistered beside it, and the difference is worth
+// stating: that hook runs on one door and is emitted only when the door is open.
+// This one is asked by every path that creates a person, and two of those —
+// POST <base>/accounts and POST <base>/invitations — are mounted whenever
+// authentication is. So there is no configuration under which this field would
+// have nothing to do.
+func (e *authEmitter) allowIdentityHook(b *gobuf.Buf) {
+	identityPkg := b.Import(authModule + "/identity")
+
+	comment := "AllowIdentity decides whether somebody nobody here has ever heard of " +
+		"may become an identity, and it is the one gate on that question: every path " +
+		"that would create a person asks it — a provider sign-in, a mailed code, an " +
+		"invitation and a direct provision alike. So this deployment cannot acquire " +
+		"an ungated door by turning on a sign-in method it did not have before.\n\n" +
+		"It is asked about strangers and nobody else. By the time it runs rig has " +
+		"established that the address has no provider link and no identity of its " +
+		"own, so an existing member — and somebody adding a second provider to an " +
+		"account they already have — have both been admitted without consulting it. " +
+		"Write one rule, not a chain of them."
+
+	if domains := e.auth.AllowedIdentityDomains; len(domains) > 0 {
+		comment += "\n\nLeave it nil and rig uses auth.allowed_identity_domains from " +
+			"rig.yaml, which is " + quoteList(domains...) + ". Setting this replaces that " +
+			"rule wholesale rather than adding to it: two rules merged is a rule " +
+			"nobody can read. Call identity.DomainAllowed from inside your own gate " +
+			"if you want both."
+	} else {
+		comment += "\n\nNil, the default, refuses nobody — the doors above are then " +
+			"the whole of it. auth.allowed_identity_domains in rig.yaml is the " +
+			"declarative form, and it generates one of these."
+	}
+	b.Comment(comment)
+	b.L("AllowIdentity %s.Gate", identityPkg)
+	b.NL()
+}
+
+// allowIdentityFunc emits the resolver behind that field.
+//
+// A function rather than an expression in the configuration literal, so that the
+// precedence has somewhere to be written down: a hand-written gate wins over the
+// declarative one wholesale, which is the rule rig applies everywhere a default
+// is overridable.
+func (e *authEmitter) allowIdentityFunc(b *gobuf.Buf) {
+	identityPkg := b.Import(authModule + "/identity")
+	domains := e.auth.AllowedIdentityDomains
+
+	if len(domains) == 0 {
+		b.Comment("allowIdentity is the gate on who may become a person here, and with " +
+			"no auth.allowed_identity_domains in rig.yaml it is whatever the " +
+			"application passed — nil included, which refuses nobody.")
+		b.L("func allowIdentity(h Hooks) %s.Gate { return h.AllowIdentity }", identityPkg)
+		b.NL()
+		return
+	}
+
+	b.Comment("allowIdentity is the gate on who may become a person here.\n\n" +
+		"auth.allowed_identity_domains in rig.yaml is sugar over the same hook " +
+		"rather than a mechanism beside it, so it is a Gate like any other — and a " +
+		"hook the application set wins wholesale. Merging the two would mean a " +
+		"refusal nobody could trace to a rule.\n\n" +
+		"An administrator is not asked: an invitation or a provision goes through " +
+		"whatever the list says, because somebody already here typed that address in.")
+	b.L("func allowIdentity(h Hooks) %s.Gate {", identityPkg)
+	b.L("if h.AllowIdentity != nil {")
+	b.L("return h.AllowIdentity")
+	b.L("}")
+	b.P("return %s.AllowDomains(", identityPkg)
+	for i, d := range domains {
+		if i > 0 {
+			b.P(", ")
+		}
+		b.P("%s", gobuf.Quote(d))
+	}
+	b.L(")")
 	b.L("}")
 	b.NL()
 }

@@ -107,6 +107,30 @@ type Auth struct {
 	// RequireVerifiedEmail refuses a sign-in until the address is verified.
 	RequireVerifiedEmail bool `yaml:"require_verified_email,omitempty" json:"require_verified_email,omitempty" jsonschema_description:"Refuse a sign-in until the address has been verified."`
 
+	// AllowedIdentityDomains restricts who may become a person in this
+	// deployment. Empty, the default, restricts nobody.
+	//
+	// It is the declarative half of `AllowIdentity` on the generated Hooks, and
+	// it generates one: a gate that refuses a stranger whose address is outside
+	// the list, on every door at once — a provider sign-in and a mailed code
+	// alike. An application that sets the hook itself wins wholesale, because
+	// two rules merged is a rule nobody can read.
+	//
+	// Two things about it that are not obvious from the name.
+	//
+	// It is **not** `rig_tenant.allowed_email_domains`, which is a different
+	// question at a different time: that one governs whether somebody may hold
+	// an account in a particular tenant, and it is per tenant and set at
+	// runtime. This one governs whether they may exist here at all, and a
+	// sign-in that names no tenant — the ordinary browser flow — never reaches
+	// the other.
+	//
+	// And an administrator is not asked. An invitation or a direct provision
+	// goes through whatever this says, because somebody who is already here
+	// typed that address in, and a deployment that could not invite an auditor
+	// or a contractor would be one nobody could run.
+	AllowedIdentityDomains []string `yaml:"allowed_identity_domains,omitempty" json:"allowed_identity_domains,omitempty" jsonschema_description:"Domains a stranger's address must be in to become a person here, for example example.com. A listed domain matches its subdomains. Empty, the default, restricts nobody. Not the same as a tenant's allowed_email_domains: this decides whether somebody may exist in this deployment at all, and an invitation is allowed whatever it says."`
+
 	// TrustedProxies are the networks whose X-Forwarded-For may be believed.
 	//
 	// Empty means none, and that is deliberate: an address read from a header a

@@ -328,6 +328,63 @@ proves somebody reached the address, a session proves who they are. That is why 
 listing can hand out identifiers and never tokens — and why the preview below
 hands one out too.
 
+### Who may become a person
+
+Four paths create a `rig_identity`, and until you say otherwise each has its own
+answer: `oauth.allow_provisioning` for a provider sign-in,
+`email_code.allow_provisioning` for a mailed code, and the `account.provision`
+permission for the two an administrator uses. Those are switches — "anybody" or
+"nobody new" — and there is no switch that says *"only `@example.com` addresses"*.
+
+`allowed_identity_domains` is that, on every door at once:
+
+```yaml
+auth:
+  allowed_identity_domains: [example.com]
+```
+
+A stranger whose address is outside the list cannot become a person by signing in
+with a provider or by asking for a code. An **invitation or a provision goes
+through whatever it says**, because somebody who is already here typed that
+address in — inviting an auditor, a contractor or a supply teacher with a
+personal address is the ordinary case rather than an abuse.
+
+`AllowIdentity` under [What you decide](#what-you-decide) is the same gate in Go,
+for a rule a list cannot express. Setting it **replaces** the list rather than
+adding to it: two rules merged is a refusal nobody can trace back to one. Call
+`identity.DomainAllowed` from inside your own gate if you want both.
+
+Three properties are worth knowing before writing one.
+
+**It is asked about strangers and nobody else.** By the time it runs, rig has
+established that the address has no provider link and no identity of its own — so
+an existing member, and somebody adding a second provider to an account they
+already have, have both been admitted without consulting it. That is what lets
+the body be the domain rule and nothing else, instead of a chain of exceptions
+guarding people rig had already decided about.
+
+**It gates becoming somebody, not being somebody.** An identity that already
+exists at a domain the list would now refuse goes on signing in, because nobody
+is asking about them any more. Deactivating them is the answer to that, and it is
+a different question.
+
+**It is asked as well as the switches above, never instead.** A gate cannot open
+a door `allow_provisioning` has shut, so adding one to a deployment with
+provisioning off does not quietly turn it on.
+
+One asymmetry in how a refusal is reported, and it is deliberate. A provider
+sign-in answers `no_account` carrying the gate's own sentence, so a sign-in page
+can show it. `POST /auth/email-code` answers **204 anyway** — that endpoint
+answers 204 to every address so that holding one cannot be used to ask whether
+somebody here has it, and a gate refusing out loud would be that question with a
+different spelling. The refusal goes to `rig_auth_log` as a `Failed`
+`EmailCodeRequested` with a reason naming the gate.
+
+Not to be confused with a tenant's own `allowed_email_domains`, which is a
+different question at a different time: that one governs whether somebody may
+hold an account in **one tenant**, is set per tenant at runtime, and is never
+reached by a sign-in that names no tenant.
+
 ### An invitation arrives
 
 The mail carries a link, and whoever clicks it is usually signed out on a device
@@ -602,6 +659,10 @@ settles the tenant after the callback, `allow_provisioning` is the whole switch:
 works only for an address that already has an identity, and joining a tenant is
 the picker's job rather than the callback's — `allow_joining` is not consulted
 at all.
+
+Neither of them can say *which* strangers, which is what
+[`allowed_identity_domains` and `AllowIdentity`](#who-may-become-a-person) are
+for. That gate is asked after this switch and never instead of it.
 
 #### The tenant is decided before the redirect, when it can be
 
@@ -1326,6 +1387,10 @@ auth:
   # the address. See Signing in with a provider for what else counts.
   require_verified_email: false
 
+  # Who may become a person here at all, on every door at once. Empty, the
+  # default, restricts nobody. See Who may become a person.
+  allowed_identity_domains: [example.com]
+
   # Only the numbers. Which event each limit counts is rig's — see Rate limits.
   limits:
     login_by_email: {max: 5, window: 15m}
@@ -1478,6 +1543,20 @@ front, err := api.New(pool, api.Hooks{
         Validate:  func(ctx, *account.TenantDraft) error { … },    // what a name may be
         Slug:      func(name string, id uuid.UUID) string { … },
         OnCreated: func(ctx, made account.NewTenant) error { … },  // what else it needs
+    },
+
+    // Whether somebody nobody here has ever heard of may become a person at
+    // all. Every door asks it, so turning on a sign-in method later cannot
+    // acquire an ungated one. Nil is what `allowed_identity_domains` fills in,
+    // and setting it replaces that wholesale. See Who may become a person.
+    AllowIdentity: func(ctx context.Context, in identity.Candidate) error {
+        if in.Via == identity.SourceInvitation {
+            return nil // somebody here vouched for them
+        }
+        if !identity.DomainAllowed(in.EmailAddress, ourDomains) {
+            return rigerr.Forbidden("this deployment is for %s addresses", ourDomains)
+        }
+        return nil
     },
 
     // What happens to somebody rig has never seen — asking for a code with a
@@ -1663,6 +1742,7 @@ you get by writing none of them.
 | `email_code.length` | 6 | More digits buy more attempts; fewer than six is guessable whatever the ceiling |
 | `email_code.ttl` | 10m | Longer is a live credential sitting in a mailbox; shorter is somebody who went to make tea |
 | `email_code.max_attempts` | 3 | Higher is friendlier and closer to the address lockout beside it, which is the one that costs fifteen minutes |
+| `allowed_identity_domains` | empty | Restricts nobody. Set it and a stranger outside the list cannot become a person by any door; an invitation is allowed whatever it says |
 | `email_code.allow_provisioning` | off | On, a stranger typing an address creates a person and runs `OnRegistered` before proving anything |
 | `limits.invitation_preview` | 60 / hour | Lower and a shared office stops being able to read invitation links |
 

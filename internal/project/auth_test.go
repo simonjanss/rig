@@ -305,6 +305,54 @@ func TestTrustedProxiesMustBeCIDR(t *testing.T) {
 	}
 }
 
+// TestAllowedIdentityDomainsMustBeDomains covers the entry that would otherwise
+// fail silently: the matcher skips one it cannot read rather than refusing
+// everybody, so a typo leaves the list on with the domain somebody meant to
+// allow missing from it.
+func TestAllowedIdentityDomainsMustBeDomains(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name  string
+		value string
+		says  string
+	}{
+		{"an address", "[ada@example.com]", "is not a domain"},
+		{"a URL", "[https://example.com]", "is not a domain"},
+		{"an empty entry", `["", example.com]`, "is empty"},
+		{"whitespace", `[" "]`, "is empty"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			_, diags := project.Parse("rig.yaml", []byte(minimal+
+				"auth:\n  enabled: true\n  allowed_identity_domains: "+tc.value+"\n"))
+			if !diags.HasErrors() {
+				t.Fatalf("%s was accepted", tc.name)
+			}
+			if !strings.Contains(diags.String(), tc.says) {
+				t.Errorf("unexpected message:\n%s", diags.String())
+			}
+		})
+	}
+}
+
+// TestAllowedIdentityDomainsReachTheIR pins the shapes that are allowed, since
+// the matcher strips a leading @ and surrounding space on purpose.
+func TestAllowedIdentityDomainsReachTheIR(t *testing.T) {
+	t.Parallel()
+
+	p, diags := project.Parse("rig.yaml", []byte(minimal+
+		"auth:\n  enabled: true\n  allowed_identity_domains: [example.com, \"@example.org\"]\n"))
+	if diags.HasErrors() {
+		t.Fatalf("unexpected diagnostics:\n%s", diags.String())
+	}
+	got := p.Config.Auth.IR().AllowedIdentityDomains
+	if len(got) != 2 || got[0] != "example.com" || got[1] != "@example.org" {
+		t.Errorf("allowed_identity_domains = %v", got)
+	}
+}
+
 // A project with no authentication carries no auth block in the document, which
 // is what tells a generator there is nothing to describe.
 func TestAuthIRIsAbsentWhenDisabled(t *testing.T) {

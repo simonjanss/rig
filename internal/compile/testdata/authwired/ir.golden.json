@@ -1614,6 +1614,10 @@
       },
       "allow_tenant_creation": true,
       "require_verified_email": true,
+      "allowed_identity_domains": [
+        "example.com",
+        "example.org"
+      ],
       "trusted_proxies": [
         "10.0.0.0/8",
         "192.168.0.0/16"

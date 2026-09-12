@@ -16,6 +16,7 @@ import (
 	"github.com/simonjanss/rig/auth"
 	"github.com/simonjanss/rig/auth/account"
 	"github.com/simonjanss/rig/auth/authhttp"
+	"github.com/simonjanss/rig/auth/identity"
 	"github.com/simonjanss/rig/auth/session"
 	"github.com/simonjanss/rig/runtime/serve"
 	"github.com/simonjanss/rig/runtime/throttle"
@@ -65,6 +66,23 @@ type Hooks struct {
 	// The trade in the other direction is latency: a queued reset mail arrives up
 	// to one dispatch interval late, where inline it went out inside the request.
 	Mail auth.MailOptions
+
+	// AllowIdentity decides whether somebody nobody here has ever heard of may
+	// become an identity, and it is the one gate on that question: every path that
+	// would create a person asks it — a provider sign-in, a mailed code, an
+	// invitation and a direct provision alike. So this deployment cannot acquire
+	// an ungated door by turning on a sign-in method it did not have before.
+	//
+	// It is asked about strangers and nobody else. By the time it runs rig has
+	// established that the address has no provider link and no identity of its
+	// own, so an existing member — and somebody adding a second provider to an
+	// account they already have — have both been admitted without consulting it.
+	// Write one rule, not a chain of them.
+	//
+	// Nil, the default, refuses nobody — the doors above are then the whole of
+	// it. auth.allowed_identity_domains in rig.yaml is the declarative form, and
+	// it generates one of these.
+	AllowIdentity identity.Gate
 
 	// OnJoined runs inside the transaction that accepts an invitation, after the
 	// account exists and before the session is issued, and an error rolls the
@@ -175,6 +193,7 @@ func Config(pool *pgxpool.Pool, h Hooks) (auth.Config, error) {
 
 		AllowTenantCreation:  false,
 		RequireVerifiedEmail: false,
+		AllowIdentity:        allowIdentity(h),
 		OnJoined:             h.OnJoined,
 
 		Grants:           h.Grants,
@@ -236,6 +255,11 @@ func limits() throttle.Defaults {
 	d.InvitationPreview.Max, d.InvitationPreview.Window = 60, time.Hour
 	return d
 }
+
+// allowIdentity is the gate on who may become a person here, and with no
+// auth.allowed_identity_domains in rig.yaml it is whatever the application
+// passed — nil included, which refuses nobody.
+func allowIdentity(h Hooks) identity.Gate { return h.AllowIdentity }
 
 // AuthMailDispatcher is the guarantee behind every link rig mints: it sends
 // what a request queued, retries what a provider refused, and gives back the
