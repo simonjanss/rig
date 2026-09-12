@@ -22,9 +22,7 @@ require (
 	github.com/go-openapi/swag/jsonname v0.26.1 // indirect
 	github.com/pb33f/jsonpath v0.8.2 // indirect
 	github.com/pressly/goose/v3 v3.27.3 // indirect
-	golang.org/x/crypto v0.54.0 // indirect
 	golang.org/x/oauth2 v0.36.0 // indirect
-	golang.org/x/sys v0.47.0 // indirect
 )
 
 require (
