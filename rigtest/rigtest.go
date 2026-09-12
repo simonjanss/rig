@@ -46,7 +46,17 @@ type Config struct {
 	// fallback: a hardcoded port is wrong the moment two checkouts run at once,
 	// and a harness that guessed would send one branch's migrations into
 	// another's schema.
+	//
+	// Leave it empty and set Pool instead when the suite already has one.
 	DatabaseURL string
+
+	// Pool is an existing pool to use rather than opening one, for a suite
+	// adopting this package a read at a time: the application's own fixtures go
+	// on using the pool they already had, and nothing has two pools against one
+	// database competing for its connections.
+	//
+	// It is not closed here, because it was not opened here.
+	Pool *pgxpool.Pool
 
 	// Migrations are every set to apply, in order — which is what the generated
 	// api.MigrationSources returns, rig's sets first and the project's last.
@@ -80,9 +90,10 @@ type Rig struct {
 func New(tb testing.TB, cfg Config) *Rig {
 	tb.Helper()
 
-	if cfg.DatabaseURL == "" {
-		tb.Fatal("rigtest: no DatabaseURL. Point it at a database — `rig db url` " +
-			"prints this project's — rather than letting the suite skip itself green.")
+	if cfg.DatabaseURL == "" && cfg.Pool == nil {
+		tb.Fatal("rigtest: no DatabaseURL and no Pool. Point it at a database — " +
+			"`rig db url` prints this project's — rather than letting the suite skip " +
+			"itself green.")
 	}
 	if len(cfg.Migrations) == 0 {
 		tb.Fatal("rigtest: no Migrations. Pass api.MigrationSources(yours) from the " +
@@ -90,15 +101,21 @@ func New(tb testing.TB, cfg Config) *Rig {
 	}
 
 	ctx := context.Background()
-	pool, err := pgxpool.New(ctx, cfg.DatabaseURL)
-	if err != nil {
-		tb.Fatalf("rigtest: %s: %v", cfg.DatabaseURL, err)
+	pool := cfg.Pool
+	if pool == nil {
+		opened, err := pgxpool.New(ctx, cfg.DatabaseURL)
+		if err != nil {
+			tb.Fatalf("rigtest: %s: %v", cfg.DatabaseURL, err)
+		}
+		if err := opened.Ping(ctx); err != nil {
+			opened.Close()
+			tb.Fatalf("rigtest: nothing answering at %s: %v", cfg.DatabaseURL, err)
+		}
+		// Only what this package opened, which is why a borrowed Pool is left
+		// alone: closing somebody else's would end their suite, not this one.
+		tb.Cleanup(opened.Close)
+		pool = opened
 	}
-	if err := pool.Ping(ctx); err != nil {
-		pool.Close()
-		tb.Fatalf("rigtest: nothing answering at %s: %v", cfg.DatabaseURL, err)
-	}
-	tb.Cleanup(pool.Close)
 
 	if err := apply(ctx, pool, cfg); err != nil {
 		tb.Fatalf("rigtest: %v", err)

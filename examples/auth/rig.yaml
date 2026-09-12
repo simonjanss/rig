@@ -60,6 +60,24 @@ auth:
   tenant:
     from: [query, header]
 
+  # Who may become a person here at all — every door asks it, so turning on a
+  # sign-in method later cannot acquire an ungated one.
+  #
+  # Two entries rather than one because this example demonstrates two arrivals:
+  # the seeded people are at example.com and the web walkthrough registers at
+  # acme.test. A third domain is refused at the provider button and at the code
+  # form alike, and `auth_gate_docker_test.go` is that written down.
+  #
+  # An invitation goes through whatever this says. Somebody who is already here
+  # typed that address in, and a deployment that could not invite an auditor or
+  # a contractor would be one nobody could run.
+  #
+  # Not the tenant's own `allowed_email_domains`, which is a different question:
+  # that one is about holding an account in one tenant, is set per tenant at run
+  # time, and a sign-in naming no tenant never reaches it. Both are in play here
+  # — see the provision tests, which exercise the other one.
+  allowed_identity_domains: [example.com, acme.test]
+
   # Ninety days of authentication trail, then `auth prune-auth-log` takes it. The
   # window has a floor rig refuses to go under: the rate limits are counted from
   # rig_auth_log, so pruning inside one of their windows would clear a lockout by

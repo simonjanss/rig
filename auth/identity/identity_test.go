@@ -2,6 +2,7 @@ package identity_test
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/simonjanss/rig/auth/identity"
@@ -107,11 +108,13 @@ func TestAllowWithNoGate(t *testing.T) {
 		t.Fatalf("no gate refused somebody: %v", err)
 	}
 
+	// The gate's own error, unwrapped and unreplaced: the sentence an
+	// application wrote is what a refusal has to be able to say.
 	want := rigerr.Forbidden("no")
 	got := identity.Allow(context.Background(), func(context.Context, identity.Candidate) error {
 		return want
 	}, identity.Candidate{})
-	if got != want {
+	if !errors.Is(got, want) {
 		t.Errorf("Allow answered %v, want the gate's own error", got)
 	}
 }

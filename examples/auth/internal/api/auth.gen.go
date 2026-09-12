@@ -140,9 +140,10 @@ type Hooks struct {
 	// account they already have — have both been admitted without consulting it.
 	// Write one rule, not a chain of them.
 	//
-	// Nil, the default, refuses nobody — the doors above are then the whole of
-	// it. auth.allowed_identity_domains in rig.yaml is the declarative form, and
-	// it generates one of these.
+	// Leave it nil and rig uses auth.allowed_identity_domains from rig.yaml, which
+	// is "example.com", "acme.test". Setting this replaces that rule wholesale
+	// rather than adding to it: two rules merged is a rule nobody can read. Call
+	// identity.DomainAllowed from inside your own gate if you want both.
 	AllowIdentity identity.Gate
 
 	// OnRegistered runs inside the transaction that creates somebody rig has never
@@ -575,10 +576,21 @@ func limits() throttle.Defaults {
 	return d
 }
 
-// allowIdentity is the gate on who may become a person here, and with no
-// auth.allowed_identity_domains in rig.yaml it is whatever the application
-// passed — nil included, which refuses nobody.
-func allowIdentity(h Hooks) identity.Gate { return h.AllowIdentity }
+// allowIdentity is the gate on who may become a person here.
+//
+// auth.allowed_identity_domains in rig.yaml is sugar over the same hook rather
+// than a mechanism beside it, so it is a Gate like any other — and a hook
+// the application set wins wholesale. Merging the two would mean a refusal
+// nobody could trace to a rule.
+//
+// An administrator is not asked: an invitation or a provision goes through
+// whatever the list says, because somebody already here typed that address in.
+func allowIdentity(h Hooks) identity.Gate {
+	if h.AllowIdentity != nil {
+		return h.AllowIdentity
+	}
+	return identity.AllowDomains("example.com", "acme.test")
+}
 
 // AuthLogPruner deletes authentication log entries older than 90d, which is
 // `auth.log_retention` in rig.yaml.

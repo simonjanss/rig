@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5/pgxpool"
 
 	"github.com/simonjanss/rig/auth/foundation"
 	"github.com/simonjanss/rig/migrate"
@@ -183,7 +184,7 @@ func TestAnIncompleteConfigFailsRatherThanSkips(t *testing.T) {
 		name string
 		cfg  rigtest.Config
 	}{
-		{"no DatabaseURL", rigtest.Config{Migrations: sources()}},
+		{"neither a DatabaseURL nor a Pool", rigtest.Config{Migrations: sources()}},
 		{"no Migrations", rigtest.Config{DatabaseURL: database(t)}},
 		{"nothing answering", rigtest.Config{
 			DatabaseURL: "postgres://rig:rig@127.0.0.1:1/rig?sslmode=disable",
@@ -290,5 +291,31 @@ func write(t *testing.T, rt *rigtest.Rig, sql string, args ...any) {
 	t.Helper()
 	if _, err := rt.Pool.Exec(context.Background(), sql, args...); err != nil {
 		t.Fatal(err)
+	}
+}
+
+// TestABorrowedPoolIsNotClosed covers the shape a suite adopting this package
+// one read at a time uses: it already has a pool, and closing it here would end
+// somebody else's test rather than this one.
+func TestABorrowedPoolIsNotClosed(t *testing.T) {
+	t.Parallel()
+
+	pool, err := pgxpool.New(context.Background(), database(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(pool.Close)
+
+	rt := rigtest.New(t, rigtest.Config{Pool: pool, Migrations: sources()})
+	if rt.Pool != pool {
+		t.Fatal("a borrowed pool was replaced")
+	}
+	// Inside a subtest, so that its cleanups have run by the time the parent
+	// asks whether the pool still works.
+	t.Run("used", func(t *testing.T) {
+		rigtest.New(t, rigtest.Config{Pool: pool, Migrations: sources()}).Tenant(t)
+	})
+	if err := pool.Ping(context.Background()); err != nil {
+		t.Fatalf("the borrowed pool was closed underneath its owner: %v", err)
 	}
 }

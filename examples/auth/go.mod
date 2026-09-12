@@ -5,9 +5,10 @@ go 1.26.6
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/simonjanss/rig/auth v0.0.0
-	github.com/simonjanss/rig/migrate v0.0.0
+	github.com/simonjanss/rig/auth v0.5.1
+	github.com/simonjanss/rig/migrate v0.5.1
 	github.com/simonjanss/rig/rigclient v0.0.0
+	github.com/simonjanss/rig/rigtest v0.0.0
 	github.com/simonjanss/rig/runtime v0.5.1
 )
 
@@ -32,6 +33,8 @@ replace github.com/simonjanss/rig/auth => ../../auth
 replace github.com/simonjanss/rig/migrate => ../../migrate
 
 replace github.com/simonjanss/rig/rigclient => ../../rigclient
+
+replace github.com/simonjanss/rig/rigtest => ../../rigtest
 
 replace github.com/simonjanss/rig/runtime => ../../runtime
 
