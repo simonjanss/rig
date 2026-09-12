@@ -76,11 +76,25 @@ type notifier struct {
 	// codes is every code this notifier has been handed, so that a test about
 	// superseding can see that the old one and the new one are different.
 	codes []string
+
+	// store, when set, is asked whether a transaction was open at the moment
+	// this was called. It is what TestMailIsNotSentInsideATransaction asserts
+	// on: a real Notifier talks to somebody else's server, and doing that with
+	// a pool connection held is the thing the flows are shaped to avoid.
+	store                *account.MemoryStore
+	codeInTx, inviteInTx bool
+}
+
+// inTx reports whether the store has a transaction open, which is what the
+// notifier wants to know about the moment it is being called in.
+func (n *notifier) inTx() bool {
+	return n.store != nil && n.store.InTransaction()
 }
 
 func (n *notifier) SendEmailCode(_ context.Context, i *account.Identity, code string) error {
 	n.code, n.codeTo = code, i
 	n.codes = append(n.codes, code)
+	n.codeInTx = n.codeInTx || n.inTx()
 	return nil
 }
 
@@ -91,6 +105,7 @@ func (n *notifier) SendEmailVerification(_ context.Context, i *account.Identity,
 
 func (n *notifier) SendInvitation(_ context.Context, _ *account.Identity, inv *account.Invitation, token string) error {
 	n.invite, n.inviteTo = token, inv
+	n.inviteInTx = n.inviteInTx || n.inTx()
 	return nil
 }
 

@@ -214,13 +214,18 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 	}
 
 	if ident != nil {
+		var mail pendingMail
 		if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
-			return s.freshCode(ctx, ident)
+			var err error
+			mail, err = s.freshCode(ctx, ident)
+			return err
 		}); err != nil {
 			return err
 		}
+		// The entry before the mail, because it is what the rate limit counts:
+		// a provider that is down must not hand out free requests.
 		s.write(ctx, entry)
-		return nil
+		return post(ctx, mail)
 	}
 
 	// Nobody has this address, and this deployment lets one in. The person, the
@@ -233,6 +238,7 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 		DisplayName:  displayNameFor(in.EmailAddress),
 		IsActive:     true,
 	}
+	var mail pendingMail
 	if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
 		if err := s.cfg.Store.InsertIdentity(ctx, ident); err != nil {
 			return err
@@ -248,7 +254,9 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 				return err
 			}
 		}
-		return s.freshCode(ctx, ident)
+		var err error
+		mail, err = s.freshCode(ctx, ident)
+		return err
 	}); err != nil {
 		return err
 	}
@@ -259,7 +267,7 @@ func (s *Service) RequestEmailCode(ctx context.Context, in RequestEmailCodeInput
 		Detail: map[string]any{"self_registered": true},
 	})
 	s.write(ctx, entry)
-	return nil
+	return post(ctx, mail)
 }
 
 // RequestEmailCodeInput asks for a code.
@@ -274,18 +282,23 @@ type RequestEmailCodeInput struct {
 }
 
 // freshCode revokes whatever code this person has live and mints another.
-func (s *Service) freshCode(ctx context.Context, ident *Identity) error {
+//
+// It hands the send back rather than running it, because both of its callers
+// wrap it in a transaction — revoking and minting have to be one write, or a
+// crash between them leaves somebody with no live code and no way to tell — and
+// the Notifier does not belong inside one. See [Service.deliver].
+func (s *Service) freshCode(ctx context.Context, ident *Identity) (pendingMail, error) {
 	live, err := s.cfg.Store.LiveVerification(ctx, ident.ID, KindEmailCode)
 	if err != nil {
-		return err
+		return nil, err
 	}
 	if live != nil {
 		if _, err := s.cfg.Store.RevokeVerification(ctx, live.ID, s.now()); err != nil {
-			return err
+			return nil, err
 		}
 	}
-	_, err = s.deliver(ctx, ident, nil, KindEmailCode, s.cfg.EmailCode.TTL)
-	return err
+	_, mail, err := s.deliver(ctx, ident, nil, KindEmailCode, s.cfg.EmailCode.TTL)
+	return mail, err
 }
 
 // VerifyEmailCodeInput is a sign-in with a mailed code.
@@ -468,9 +481,16 @@ func (s *Service) redeemCode(
 		if err != nil {
 			return nil, err
 		}
-		s.failSignIn(ctx, at, nil, "wrong code")
-		_ = attempts
-		_ = dead
+		// What the charge cost, in the entry rather than in the response. The
+		// person at the keyboard is told the same sentence however many tries
+		// they have left; an operator reading the trail needs to tell one
+		// mistyped digit from a code that was guessed at until it died.
+		reason := fmt.Sprintf("wrong code, attempt %d of %d",
+			attempts, s.cfg.EmailCode.MaxAttempts)
+		if dead {
+			reason += ", and the code is now dead"
+		}
+		s.failSignIn(ctx, at, nil, reason)
 		return nil, ErrInvalidCode
 	}
 	return v, nil

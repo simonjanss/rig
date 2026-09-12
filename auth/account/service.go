@@ -700,8 +700,11 @@ func (s *Service) SendEmailVerification(ctx context.Context, tenantID, accountID
 		TenantID: &acct.TenantID, AccountID: &acct.ID,
 		EmailAddress: normalizeEmail(ident.EmailAddress),
 	})
-	_, err = s.deliver(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
-	return err
+	_, mail, err := s.deliver(ctx, ident, nil, KindEmailVerification, s.cfg.VerificationTTL)
+	if err != nil {
+		return err
+	}
+	return post(ctx, mail)
 }
 
 // VerifyEmail confirms an address from a link.
@@ -924,6 +927,24 @@ func (s *Service) newVerification(
 	return v, nil
 }
 
+// pendingMail is a secret that has been written and not yet handed to the
+// Notifier.
+//
+// It exists so that the send can happen after the caller's transaction rather
+// than inside it — see [Service.deliver] — and it is nil whenever there is
+// nothing for the caller to do.
+type pendingMail func(ctx context.Context) error
+
+// post hands pending mail to the Notifier, and is nothing at all when there is
+// none: the queued path sends from the dispatcher, and every caller of
+// [Service.deliver] ends in this line either way.
+func post(ctx context.Context, m pendingMail) error {
+	if m == nil {
+		return nil
+	}
+	return m(ctx)
+}
+
 // deliver is the one place the queued and inline paths differ, and every caller
 // that mints a secret goes through it.
 //
@@ -936,32 +957,48 @@ func (s *Service) newVerification(
 // invitation is the one that needs to — a listing row has to come back to
 // whoever sent it — and on the queued path the row is all there is, the secret
 // not existing until the dispatcher makes it.
+//
+// **It does not send.** What comes back with the row is the send, for the
+// caller to run once it has committed. The Notifier is the application's code
+// talking to somebody else's server, and the callers that mint a secret
+// replacing another one — [Service.freshCode] and [Service.Invite] — have to
+// revoke and mint in one transaction, so sending inside deliver would hold a
+// pool connection and an open transaction for as long as that server takes to
+// answer, with no timeout on this path at all. The queued path is where a
+// deadline lives, and there this returns nil: the dispatcher sends, under
+// [MailOptions.SendTimeout].
+//
+// The cost of the split is that a send which fails leaves a committed row
+// behind, where a send inside the transaction would have rolled it back. That
+// is the queued path's behaviour anyway, and it is the safe direction: minting
+// again supersedes what is there, so a retry is a retry rather than a conflict.
 func (s *Service) deliver(
 	ctx context.Context, ident *Identity, invite *pendingInvite, kind VerificationKind, ttl time.Duration,
-) (*Verification, error) {
+) (*Verification, pendingMail, error) {
 	if s.cfg.Outbox == nil {
 		secret, hash, err := s.mintSecret(kind, ident)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		v, err := s.newVerification(ctx, ident, invite, kind, ttl, hash)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 
 		// Read back rather than assembled, so that the mail is handed the same
 		// shape on both paths: the tenant's name comes from a join and this is
-		// the one place that has it.
+		// the one place that has it. Read here and not in the send, because the
+		// row it reads is the one just written: outside the transaction it is
+		// not there yet.
 		var inv *Invitation
 		if kind == KindInvitation {
 			if inv, err = s.cfg.Store.InvitationByID(ctx, v.ID); err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 		}
-		if err := s.notify(ctx, kind, ident, inv, secret); err != nil {
-			return nil, err
-		}
-		return v, nil
+		return v, func(ctx context.Context) error {
+			return s.notify(ctx, kind, ident, inv, secret)
+		}, nil
 	}
 
 	// Both writes together, and in the caller's transaction when there is one.
@@ -988,9 +1025,9 @@ func (s *Service) deliver(
 		})
 	})
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	return out, nil
+	return out, nil, nil
 }
 
 // pendingInvite is what an invitation's row carries beyond the secret: the

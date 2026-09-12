@@ -275,12 +275,12 @@ type AuthLimits struct {
 	// EmailCodeRequest bounds code requests per address. Default 5 per 1h.
 	EmailCodeRequest AuthLimit `yaml:"email_code_request,omitempty" json:"email_code_request,omitempty" jsonschema_description:"Sign-in codes mailed per address. Defaults to 5 per 1h."`
 	// EmailCodeByIP bounds code requests per source, across every address.
-	// Default 20 per 1h.
+	// Default 100 per 1h.
 	//
 	// The limit that matters most when auth.email_code.allow_provisioning is
 	// set: asking for a code then writes a person, and without this one script
 	// makes ten thousand identities.
-	EmailCodeByIP AuthLimit `yaml:"email_code_ip,omitempty" json:"email_code_ip,omitempty" jsonschema_description:"Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 20 per 1h."`
+	EmailCodeByIP AuthLimit `yaml:"email_code_ip,omitempty" json:"email_code_ip,omitempty" jsonschema_description:"Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 100 per 1h."`
 	// VerificationResend bounds verification mail per address. Default 5 per 1h.
 	VerificationResend AuthLimit `yaml:"verification_resend,omitempty" json:"verification_resend,omitempty" jsonschema_description:"Verification mails per address. Defaults to 5 per 1h."`
 	// Refresh bounds one session's rotations. Default 60 per 1m: a client

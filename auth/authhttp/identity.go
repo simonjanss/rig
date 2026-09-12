@@ -70,7 +70,8 @@ func (h *Handler) myInvitations(w http.ResponseWriter, r *http.Request) {
 	for _, i := range invites {
 		out = append(out, authwire.InvitationToMeView{
 			ID: i.ID, TenantID: i.TenantID, TenantName: i.TenantName,
-			Role: string(i.Role), CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
+			Role: string(i.Role), InvitedBy: i.InvitedByName,
+			CreatedAt: i.CreatedAt, ExpiresAt: i.ExpiresAt,
 		})
 	}
 	httpx.WriteJSON(w, http.StatusOK, authwire.List[authwire.InvitationToMeView]{Data: out})

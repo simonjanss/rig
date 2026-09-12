@@ -1031,3 +1031,89 @@ func wrongToken(real string) string {
 	}
 	return string(out)
 }
+
+// An invitation that lapsed still holds the unique slot, so inviting the same
+// address again has to clear it rather than leave the index to refuse.
+//
+// The index is (invited_to_tenant_id, identity_id) where the row is neither
+// consumed nor revoked, and expiry is deliberately not in it — now() cannot be
+// indexed on. Looking the slot up through a query that hides expired rows
+// therefore finds nothing, revokes nothing, and the insert collides: every
+// later invitation to that address fails, and there is no endpoint that can
+// clear it, because withdrawing also only sees the live ones.
+func TestInvitingAgainAfterTheFirstOneExpired(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	ctx := context.Background()
+	by := f.acct.ID
+
+	first, err := f.svc.Invite(ctx, account.InviteInput{
+		TenantID: f.tenant, EmailAddress: "grace@example.com", ByAccountID: &by,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	f.clock.advance(account.DefaultInvitationTTL + time.Hour)
+
+	// Gone from both listings, which is what makes the slot invisible.
+	if pending, err := f.svc.Invitations(ctx, f.tenant); err != nil {
+		t.Fatal(err)
+	} else if len(pending) != 0 {
+		t.Fatalf("an expired invitation should not be listed: %+v", pending)
+	}
+
+	second, err := f.svc.Invite(ctx, account.InviteInput{
+		TenantID: f.tenant, EmailAddress: "grace@example.com", ByAccountID: &by,
+	})
+	if err != nil {
+		t.Fatalf("inviting again after the first lapsed: %v", err)
+	}
+	if second.ID == first.ID {
+		t.Error("the second invitation should be a new row")
+	}
+
+	// And the newest is the one that is waiting, rather than two of them.
+	pending, err := f.svc.Invitations(ctx, f.tenant)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(pending) != 1 || pending[0].ID != second.ID {
+		t.Fatalf("got %d invitations, want only the new one: %+v", len(pending), pending)
+	}
+}
+
+// Mail goes out after the transaction that wrote the row it is about, never
+// inside it.
+//
+// The Notifier is the application's code talking to somebody else's server, and
+// there is no timeout on the inline path. Called inside InTx it would hold a
+// pool connection and an open transaction for as long as that server takes to
+// answer — on the sign-in endpoint, which is the busiest one there is.
+func TestMailIsNotSentInsideATransaction(t *testing.T) {
+	t.Parallel()
+
+	f := setup(t)
+	ctx := context.Background()
+	f.notify.store = f.store
+	by := f.acct.ID
+
+	if err := f.svc.RequestEmailCode(ctx, account.RequestEmailCodeInput{
+		EmailAddress: "sam@example.com", IPAddress: "203.0.113.10",
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.notify.codeInTx {
+		t.Error("the code was mailed from inside a transaction")
+	}
+
+	if _, err := f.svc.Invite(ctx, account.InviteInput{
+		TenantID: f.tenant, EmailAddress: "grace@example.com", ByAccountID: &by,
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if f.notify.inviteInTx {
+		t.Error("the invitation was mailed from inside a transaction")
+	}
+}

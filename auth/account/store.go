@@ -161,7 +161,7 @@ const (
 	//
 	// The one kind whose secret is guessable, which is why it is the only one
 	// with an attempt ceiling and the only one not found by its hash — see
-	// [Verification.Attempts] and [Store.LiveCodeFor].
+	// [Verification.Attempts] and [Store.LiveVerification].
 	KindEmailCode VerificationKind = "EmailCode"
 	// KindInvitation is a pending membership. Accepting it is what creates the
 	// account in the tenant, so the row carries everything that account will be
@@ -361,6 +361,18 @@ type Store interface {
 	// how the in-memory double and the real store end up disagreeing.
 	InvitationByID(ctx context.Context, id uuid.UUID) (*Invitation, error)
 	InvitationByToken(ctx context.Context, hash []byte) (*Invitation, error)
+
+	// InvitationSlot is the invitation holding one person's place in one
+	// tenant, or nil.
+	//
+	// What it reads is the unique index: one live invitation per person per
+	// tenant, where live means not consumed and not revoked and says nothing
+	// about expiry, because now() is not immutable and cannot be indexed on. So
+	// this must not filter on expiry either — an expired invitation still holds
+	// the slot, and [Service.Invite] is what clears it. A lookup that hid one
+	// would leave the index to refuse the next invitation, and nothing in the
+	// API could ever clear it.
+	InvitationSlot(ctx context.Context, tenantID, identityID uuid.UUID) (*Invitation, error)
 
 	// RevokeVerification cancels a row. It must be a no-op on one that is
 	// already consumed or revoked, and report whether it changed anything, so

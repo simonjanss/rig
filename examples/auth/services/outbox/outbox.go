@@ -80,7 +80,6 @@ func (b *Box) SendInvitation(_ context.Context, i *account.Identity, inv *accoun
 	return nil
 }
 
-// SendPasswordReset implements [account.Notifier].
 // SendEmailCode implements [account.Notifier].
 //
 // The one secret here that somebody reads out rather than clicks, which is why

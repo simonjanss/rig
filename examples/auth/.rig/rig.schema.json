@@ -183,7 +183,7 @@
         },
         "email_code_ip": {
           "$ref": "#/$defs/AuthLimit",
-          "description": "Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 20 per 1h."
+          "description": "Sign-in codes asked for per source address, across every address. With allow_provisioning set this is what bounds identity creation. Defaults to 100 per 1h."
         },
         "verification_resend": {
           "$ref": "#/$defs/AuthLimit",

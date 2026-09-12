@@ -1665,8 +1665,9 @@ func TestSigningInWithNoTenant(t *testing.T) {
 		// Invited by somebody who can, into the tenant they run.
 		grant(t, h, account.PermissionProvision)
 		p := h.login(t)
-		// Inviting is provisioning with a link: the account is made and a
-		// single-use token is sent, rather than a password being set for somebody.
+		// Inviting creates nothing in the tenant: a row that says who has been
+		// asked, and a single-use token sent to the address. Accepting is what
+		// makes an account.
 		res := h.do(t, "POST", "/auth/invitations", p.AccessToken,
 			`{"emailAddress":"`+stranger+`","displayName":"Wanderer"}`)
 		if res.status != http.StatusCreated {
@@ -1700,6 +1701,47 @@ func TestSigningInWithNoTenant(t *testing.T) {
 		// redeem one: the token went to an address, and that is the claim it makes.
 		if page.Data[0].Token != "" {
 			t.Error("listing invitations must not hand out their tokens")
+		}
+	})
+
+	// The unique index does not mention expiry, so a lapsed invitation still
+	// holds the slot. Inviting the same address again has to clear it — through
+	// a lookup that can see an expired row, which neither listing can.
+	t.Run("inviting again after the first one lapsed", func(t *testing.T) {
+		grant(t, h, account.PermissionProvision)
+		p := h.login(t)
+
+		lapsing := "lapsed-" + uuid.New().String()[:8] + "@example.com"
+		first := h.do(t, "POST", "/auth/invitations", p.AccessToken,
+			`{"emailAddress":"`+lapsing+`"}`)
+		if first.status != http.StatusCreated {
+			t.Fatalf("invite: %d %s", first.status, first.body)
+		}
+		var was struct {
+			ID uuid.UUID `json:"id"`
+		}
+		first.decode(t, &was)
+
+		// Aged rather than slept through. The row is what expires, and moving
+		// its column is the only way to watch a week pass in a test.
+		if _, err := h.pool.Exec(t.Context(), `
+			UPDATE rig_identity_verification
+			   SET expires_at = now() - interval '1 day'
+			 WHERE id = $1`, was.ID); err != nil {
+			t.Fatal(err)
+		}
+
+		// Gone from the tenant's listing, which is exactly why the slot is easy
+		// to miss: nothing an administrator can see says it is still there.
+		listed := h.do(t, "GET", "/auth/invitations", p.AccessToken, "")
+		if bytes.Contains(listed.body, []byte(was.ID.String())) {
+			t.Errorf("an expired invitation should not be listed: %s", listed.body)
+		}
+
+		again := h.do(t, "POST", "/auth/invitations", p.AccessToken,
+			`{"emailAddress":"`+lapsing+`"}`)
+		if again.status != http.StatusCreated {
+			t.Fatalf("inviting again after the first lapsed: %d %s", again.status, again.body)
 		}
 	})
 
@@ -1758,12 +1800,20 @@ func TestLeavingThePicker(t *testing.T) {
 		listed := h.do(t, "GET", "/auth/me/invitations", token, "")
 		var page struct {
 			Data []struct {
-				ID uuid.UUID `json:"id"`
+				ID        uuid.UUID `json:"id"`
+				InvitedBy string    `json:"invitedBy"`
 			} `json:"data"`
 		}
 		listed.decode(t, &page)
 		if len(page.Data) != 1 {
 			t.Fatalf("got %d invitations, want 1: %s", len(page.Data), listed.body)
+		}
+		// Who asked, which is the whole reason the row is worth rendering: "you
+		// have been invited" with nobody's name on it is a row somebody
+		// distrusts. The harness's own account did the inviting.
+		if page.Data[0].InvitedBy != "Sam" {
+			t.Errorf("invitedBy = %q, want %q: %s",
+				page.Data[0].InvitedBy, "Sam", listed.body)
 		}
 
 		// The identifier is enough. Being signed in as the person invited is a

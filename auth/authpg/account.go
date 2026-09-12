@@ -314,12 +314,28 @@ func (s *AccountStore) InvitationByToken(ctx context.Context, hash []byte) (*acc
 	return s.oneInvitation(ctx, `v.token_hash = $1`, hash)
 }
 
+// InvitationSlot implements [account.Store].
+//
+// The predicate is the unique index's, minus the two conditions invitations
+// already applies: rig_identity_verification_live_invitation_key is
+// (invited_to_tenant_id, identity_id) where the row is neither consumed nor
+// revoked. Expiry is not in the index and must not be here — an expired
+// invitation still occupies the slot, and this is what finds it so that
+// inviting again can clear it.
+func (s *AccountStore) InvitationSlot(
+	ctx context.Context, tenantID, identityID uuid.UUID,
+) (*account.Invitation, error) {
+	return s.oneInvitation(ctx,
+		`v.invited_to_tenant_id = $1 AND v.identity_id = $2`, tenantID, identityID)
+}
+
 // oneInvitation is [AccountStore.invitations] where at most one row can match.
 //
-// Neither of its callers filters on expiry, and that is deliberate: the service
+// None of its callers filters on expiry, and that is deliberate: the service
 // compares against its own clock — which a test can move — and a second opinion
 // in SQL is how a double and the database come apart about the property under
-// test.
+// test. For [AccountStore.InvitationSlot] it is more than a preference: the
+// index it stands in for does not mention expiry either.
 func (s *AccountStore) oneInvitation(ctx context.Context, where string, args ...any) (*account.Invitation, error) {
 	out, err := s.invitations(ctx, where, args...)
 	if err != nil || len(out) == 0 {

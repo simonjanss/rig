@@ -1580,8 +1580,9 @@ Every secret rig mints — a sign-in code, an address confirmation, an invitatio
 goes out through your `Notifier`. By default that call happens **inside the
 request that asked for it**, which is the simplest thing and has one bad
 afternoon in it: when your provider is down, the request fails, the caller's
-rate-limit budget is already spent, and the token that was just minted is dead.
-The person asks again and it costs them another attempt against the limiter.
+rate-limit budget is already spent, and the secret that was just minted is one
+nobody ever received. The person asks again and it costs them another attempt
+against the limiter.
 
 Set `Mail.Queue` and the link is written to `rig_identity_verification_delivery`
 in the same transaction instead, and sent later:

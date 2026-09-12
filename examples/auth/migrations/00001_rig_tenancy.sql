@@ -112,9 +112,11 @@ CREATE TABLE rig_identity_verification (
     -- attempts rather than merely be slowed down by a rate limit.
     attempts                integer NOT NULL DEFAULT 0,
 
-    -- The three an invitation carries and nothing else does. Null everywhere
-    -- else, and there is no CHECK tying them to the kind: the columns are
-    -- written by one code path and a constraint would only restate it.
+    -- The four an invitation carries and nothing else does. Null everywhere
+    -- else, and the CHECK below ties the two that matter to the kind, so that
+    -- "an invitation with no tenant or role" is unreachable rather than a
+    -- branch in Go. The other two are free-form: an invitation may name nobody
+    -- who sent it, and may leave the name to the person's own.
     invited_role            rig_account_role_level,
     invited_display_name    text,
     invited_by_account_id   uuid,

@@ -19,6 +19,15 @@ type MemoryStore struct {
 	accounts      map[uuid.UUID]*Account
 	verifications map[uuid.UUID]*Verification
 
+	// depth is how many InTx calls are open, which is what
+	// [MemoryStore.InTransaction] reports.
+	//
+	// The real store's InTx holds a pool connection, so anything slow inside one
+	// — a Notifier calling somebody else's server — is a connection held for as
+	// long as that takes. Counting it here is how a test can say "not from
+	// inside a transaction" about something no assertion could otherwise see.
+	depth int
+
 	// Now is the clock the expiry filters read, so that a test advancing its own
 	// clock sees invitations expire the way Postgres would. Unset means
 	// time.Now.
@@ -303,9 +312,32 @@ func (s *MemoryStore) MarkIdentityVerified(_ context.Context, identityID uuid.UU
 }
 
 // CreateVerification implements [Store].
+//
+// It enforces the one unique index this table has that a caller can trip over:
+// one live invitation per person per tenant. Live is not consumed and not
+// revoked, and — like the index — says nothing about expiry, which is the whole
+// point of enforcing it here. A caller that clears the slot by a lookup which
+// hides expired rows passes against a double that does not check and fails
+// against Postgres, which is exactly the kind of disagreement this store is
+// written to avoid.
 func (s *MemoryStore) CreateVerification(_ context.Context, v *Verification) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+
+	if v.Kind == KindInvitation && v.InvitedToTenantID != nil {
+		for _, other := range s.verifications {
+			if other.Kind != KindInvitation || other.ConsumedAt != nil || other.RevokedAt != nil {
+				continue
+			}
+			if other.IdentityID != v.IdentityID || other.InvitedToTenantID == nil ||
+				*other.InvitedToTenantID != *v.InvitedToTenantID {
+				continue
+			}
+			return fmt.Errorf(
+				"account: an invitation into tenant %s is already live for identity %s",
+				*v.InvitedToTenantID, v.IdentityID)
+		}
+	}
 
 	copied := *v
 	s.verifications[v.ID] = &copied
@@ -355,6 +387,26 @@ func (s *MemoryStore) InvitationByToken(_ context.Context, hash []byte) (*Invita
 
 	out := s.invitations(func(v *Verification) bool {
 		return len(v.TokenHash) > 0 && bytes.Equal(v.TokenHash, hash)
+	})
+	if len(out) == 0 {
+		return nil, nil
+	}
+	return &out[0], nil
+}
+
+// InvitationSlot implements [Store].
+//
+// No expiry filter, standing in for a unique index that has none: an expired
+// invitation still holds the slot, so hiding it here would be hiding the row
+// the real store is about to refuse a second invitation over.
+func (s *MemoryStore) InvitationSlot(
+	_ context.Context, tenantID, identityID uuid.UUID,
+) (*Invitation, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	out := s.invitations(func(v *Verification) bool {
+		return *v.InvitedToTenantID == tenantID && v.IdentityID == identityID
 	})
 	if len(out) == 0 {
 		return nil, nil
@@ -522,8 +574,31 @@ func (s *MemoryStore) ConsumeVerification(_ context.Context, id uuid.UUID, at ti
 }
 
 // InTx implements [Store].
+//
+// Re-entrant, like the real one, and it counts: see [MemoryStore.InTransaction].
 func (s *MemoryStore) InTx(ctx context.Context, fn func(ctx context.Context) error) error {
+	s.mu.Lock()
+	s.depth++
+	s.mu.Unlock()
+	defer func() {
+		s.mu.Lock()
+		s.depth--
+		s.mu.Unlock()
+	}()
 	return fn(ctx)
+}
+
+// InTransaction reports whether the caller is running inside [MemoryStore.InTx].
+//
+// It is for the assertion a Notifier makes about itself: the mail a flow sends
+// must go out after the transaction that wrote the row it is about, because the
+// real store would otherwise be holding a connection open across somebody
+// else's server.
+func (s *MemoryStore) InTransaction() bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	return s.depth > 0
 }
 
 // MemoryOutbox is an [Outbox] over a map, for tests and for development.

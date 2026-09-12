@@ -273,13 +273,19 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 		return nil, rigerr.Conflict("that person already has an account here")
 	}
 
-	var out *Verification
+	var (
+		out  *Verification
+		mail pendingMail
+	)
 	if err := s.cfg.Store.InTx(ctx, func(ctx context.Context) error {
 		// Whatever is in the slot comes out first. The unique index this
 		// protects cannot include the expiry — now() is not immutable, so it
 		// cannot be indexed on — which means an expired invitation still holds
-		// the slot and something has to clear it.
-		live, err := s.liveInvitation(ctx, in.TenantID, ident.ID)
+		// the slot and something has to clear it. That is why the lookup is
+		// InvitationSlot and not one of the listings: those hide an expired
+		// row, and clearing the slot with a query that cannot see what is in it
+		// leaves the index to refuse every later invitation to that address.
+		live, err := s.cfg.Store.InvitationSlot(ctx, in.TenantID, ident.ID)
 		if err != nil {
 			return err
 		}
@@ -289,7 +295,7 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 			}
 		}
 
-		v, err := s.deliver(ctx, ident, &pendingInvite{
+		v, send, err := s.deliver(ctx, ident, &pendingInvite{
 			TenantID:    in.TenantID,
 			Role:        orRole(in.Role),
 			DisplayName: strings.TrimSpace(in.DisplayName),
@@ -299,7 +305,7 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 		if err != nil {
 			return err
 		}
-		out = v
+		out, mail = v, send
 
 		// The entry stays here rather than moving to the dispatcher, and that is
 		// deliberate: rig_auth_log is both the audit trail and what the rate
@@ -323,6 +329,14 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 		return nil, err
 	}
 
+	// The mail after the commit, never inside it: see [Service.deliver]. A
+	// failure here leaves the invitation standing, which is what the queued path
+	// does too — and inviting the same address again supersedes it, so the way
+	// out of a broken mail provider is to ask a second time.
+	if err := post(ctx, mail); err != nil {
+		return nil, err
+	}
+
 	inv, err := s.cfg.Store.InvitationByID(ctx, out.ID)
 	if err != nil {
 		return nil, err
@@ -331,21 +345,6 @@ func (s *Service) Invite(ctx context.Context, in InviteInput) (*Invitation, erro
 		return nil, rigerr.Internal(nil, "invitation %s vanished as it was created", out.ID)
 	}
 	return inv, nil
-}
-
-// liveInvitation is the invitation already waiting for somebody in one tenant,
-// or nil.
-func (s *Service) liveInvitation(ctx context.Context, tenantID, identityID uuid.UUID) (*Invitation, error) {
-	mine, err := s.cfg.Store.InvitationsForIdentity(ctx, identityID)
-	if err != nil {
-		return nil, err
-	}
-	for i := range mine {
-		if mine[i].TenantID == tenantID {
-			return &mine[i], nil
-		}
-	}
-	return nil, nil
 }
 
 // DomainAllowed reports whether an address may be used in a tenant.
