@@ -163,6 +163,25 @@ func (s *server) seed(t *testing.T) uuid.UUID {
 	if err := app.Seed(context.Background(), s.pool); err != nil {
 		t.Fatal(err)
 	}
+
+	// Forget how many codes the seeded pair have been sent.
+	//
+	// rig_auth_log is both the audit trail and the rate-limit substrate, and
+	// this database is throwaway but not reset between runs — so a suite that
+	// signs in as two fixed addresses dozens of times per run spends their
+	// hourly budget on itself, and the second run of the morning is a wall of
+	// 429s that says nothing about the code.
+	//
+	// Deleting only the request rows for those two addresses, because the limit
+	// is the thing being got out of the way and everything else in the table is
+	// somebody's assertion.
+	if _, err := s.pool.Exec(context.Background(), `
+		DELETE FROM rig_auth_log
+		 WHERE event = 'EmailCodeRequested'
+		   AND lower(email_address) = ANY($1)`,
+		[]string{app.SeedEmail, app.SeedEmail2}); err != nil {
+		t.Fatal(err)
+	}
 	return uuid.MustParse(app.SeedTenantID)
 }
 
