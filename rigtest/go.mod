@@ -5,8 +5,8 @@ go 1.26.6
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/simonjanss/rig/auth v0.5.1
-	github.com/simonjanss/rig/migrate v0.5.1
+	github.com/simonjanss/rig/auth v0.6.0
+	github.com/simonjanss/rig/migrate v0.6.0
 )
 
 require (
@@ -16,7 +16,7 @@ require (
 	github.com/mfridman/interpolate v0.0.2 // indirect
 	github.com/pressly/goose/v3 v3.27.3 // indirect
 	github.com/sethvargo/go-retry v0.4.0 // indirect
-	github.com/simonjanss/rig/runtime v0.5.1 // indirect
+	github.com/simonjanss/rig/runtime v0.6.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
 	golang.org/x/sync v0.22.0 // indirect
 	golang.org/x/text v0.40.0 // indirect
