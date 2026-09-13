@@ -42,7 +42,14 @@ import (
 const (
 	// Pinned, so a run means the same thing on every machine — the way
 	// electricsql/electric is pinned in internal/electrictest.
-	minioImage = "minio/minio:RELEASE.2025-09-07T16-13-09Z"
+	//
+	// The registry is part of the pin rather than noise. An unqualified name is
+	// a Docker Hub one, and MinIO removed minio/minio from Docker Hub: the
+	// repository answers 404, and what a runner sees is `pull access denied ...
+	// repository does not exist or may require 'docker login'` — which reads as
+	// a credentials problem on the machine rather than as the image being gone.
+	// quay.io is where the project publishes, and it still carries this tag.
+	minioImage = "quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z"
 	minioName  = "rigS3-minio"
 	// minioPort is dockerdb.PortS3MinIO. See this file's doc comment.
 	minioPort = 55446

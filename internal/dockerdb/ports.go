@@ -64,6 +64,12 @@ const (
 	// published and cannot import this package, so the number lives in
 	// rigtest/postgres_docker_test.go and is only declared here.
 	PortRigTest = 55447
+	// PortMigrate is the database the migrate module's own suite runs against,
+	// and it is the fourth exception. The reason is the third's and one more:
+	// migrate is published, and this package imports it, so an import the other
+	// way would be a cycle as well as a dependency on the CLI. The number lives
+	// in migrate/postgres_docker_test.go and is only declared here.
+	PortMigrate = 55448
 	// PortIdempotency is internal/idemtest, where two transactions contend for
 	// one key. Its own container because the contention is the test: a suite
 	// sharing a database with one that holds locks of its own would fail as a
@@ -136,6 +142,7 @@ var ports = map[string]int{
 	"internal/filestest":                PortFiles,
 	"rigs3 (minio)":                     PortS3MinIO,
 	"rigtest":                           PortRigTest,
+	"migrate":                           PortMigrate,
 	"internal/idemtest":                 PortIdempotency,
 	"internal/throttletest":             PortThrottle,
 	"internal/electrictest (sync)":      PortElectricSync,

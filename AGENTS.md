@@ -91,11 +91,10 @@ make examples      # check all five examples for drift and run them for real
 
 `make test-docker` covers `.`, `runtime`, `auth`, `authmodel`, `files`,
 `notify`, `observe`, `presence`, `migrate`, `rigclient`, `rigs3` and `rigtest`.
-All of it wants Postgres except `rigs3`, which wants MinIO.
-Most of it starts its own Postgres on a port of its own and cleans up after
-itself. The `migrate` module is the exception: it expects a database at
-`localhost:55440`, or wherever `DATABASE_URL` points, and **skips itself
-silently** when there is none — so a green run there does not mean it ran.
+All of it wants Postgres except `rigs3`, which wants MinIO. Every suite starts
+its own container on a port of its own and leaves it warm, so there is nothing
+to bring up first and nothing that can skip for want of a database: a green run
+here is a run.
 
 `make examples` is the strongest regression test in the repository. It runs
 `rig check` in each example, then builds and tests it; the examples are real
@@ -114,7 +113,10 @@ Every port a suite or an example pins is named in `internal/dockerdb/ports.go`,
 and a test there refuses two suites on one number. A new suite takes its port
 from that file rather than by grepping for one that looks free — the examples
 are listed there too, even though their own configuration is where the number
-actually lives.
+actually lives. So are `migrate`, `rigs3` and `rigtest`, which are published and
+so cannot import that package: each writes its number out in its own test and is
+declared there anyway, because a number that is not on the list is a collision
+nothing checks for.
 
 **Two checkouts of rig on one machine do not share a database.** The Makefile
 exports `RIG_DB_ISOLATE=$(CURDIR)`, and rig answers by suffixing every container
