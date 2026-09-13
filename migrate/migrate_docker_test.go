@@ -7,7 +7,6 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -18,8 +17,6 @@ import (
 
 	"github.com/simonjanss/rig/migrate"
 )
-
-const dsnFallback = "postgres://rig:rig@localhost:55440/rig?sslmode=disable"
 
 // One migration, in the shape goose reads and rig writes.
 func schema(table string) fstest.MapFS {
@@ -74,7 +71,22 @@ func TestUpAppliesOnceAndIsIdempotent(t *testing.T) {
 func TestConcurrentRunnersDoNotCollide(t *testing.T) {
 	files := schema("migrate_test_race")
 
+	// Every handle is opened here, before a runner starts. t.Fatal and t.Skip
+	// only end the goroutine they are called from, so a database this test
+	// could not reach would end four runners quietly and leave the assertion
+	// below reporting "applied 0 times across 4 runners" — a diagnosis about
+	// the advisory lock, which is the one thing this test exists to prove.
+	//
+	// One handle each rather than one shared: four pools are four sessions, and
+	// the lock is only contended between sessions. They share a bookkeeping
+	// table on purpose — that is what they are contending for.
 	const runners = 4
+	dbs := make([]*sql.DB, runners)
+	var opt migrate.Options
+	for i := range dbs {
+		dbs[i], opt = connect(t, "race")
+	}
+
 	var (
 		wg      sync.WaitGroup
 		mu      sync.Mutex
@@ -87,8 +99,7 @@ func TestConcurrentRunnersDoNotCollide(t *testing.T) {
 		go func() {
 			defer wg.Done()
 
-			db, opt := connect(t, "race")
-			applied, err := migrate.Up(context.Background(), db, files, opt)
+			applied, err := migrate.Up(context.Background(), dbs[i], files, opt)
 
 			mu.Lock()
 			defer mu.Unlock()
@@ -126,18 +137,15 @@ func TestAnEmptyDirectoryIsNotAFailure(t *testing.T) {
 func connect(t *testing.T, name string) (*sql.DB, migrate.Options) {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = dsnFallback
-	}
+	dsn := database(t)
 
 	db, err := sql.Open("pgx", dsn)
 	if err != nil {
-		t.Skipf("no database at %s: %v — run `rig db up` first", dsn, err)
+		t.Fatalf("opening %s: %v", dsn, err)
 	}
 	if err := db.Ping(); err != nil {
 		db.Close()
-		t.Skipf("no database at %s: %v — run `rig db up` first", dsn, err)
+		t.Fatalf("reaching %s: %v", dsn, err)
 	}
 	t.Cleanup(func() { db.Close() })
 
@@ -310,14 +318,11 @@ CREATE TABLE migrate_test_requireall_x (id int PRIMARY KEY);
 func openPool(t *testing.T) *pgxpool.Pool {
 	t.Helper()
 
-	dsn := os.Getenv("DATABASE_URL")
-	if dsn == "" {
-		dsn = dsnFallback
-	}
+	dsn := database(t)
 
 	pool, err := pgxpool.New(t.Context(), dsn)
 	if err != nil {
-		t.Skipf("no database at %s: %v", dsn, err)
+		t.Fatalf("opening a pool on %s: %v", dsn, err)
 	}
 	t.Cleanup(pool.Close)
 

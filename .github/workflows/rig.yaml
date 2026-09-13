@@ -120,32 +120,17 @@ jobs:
           install-mode: binary
           working-directory: ${{ matrix.module }}
 
-  # The suite tagged `docker`. Most of it starts its own Postgres on a port of
-  # its own; the migrate module expects one to already be there, and skips
-  # itself when it is not — hence the service container, so the check is about
-  # the code rather than about what was reachable.
+  # The suite tagged `docker`. Every suite in it starts what it needs — Postgres
+  # for most, MinIO for rigs3 — on a port of its own, so there is no service
+  # container here and nothing for one to be. That was not always so: migrate
+  # used to expect a database somebody else had started, and a service container
+  # on 55440 was what stood in for it. The trouble with that arrangement was on
+  # the other side of it, where no such container exists: the suite skipped
+  # under `make`, and this job was green about code no workstation had run.
   docker-tests:
     name: Docker Tests
     runs-on: ubuntu-24.04
     timeout-minutes: 30
-
-    services:
-      postgres:
-        image: postgres:17-alpine
-        env:
-          POSTGRES_USER: rig
-          POSTGRES_PASSWORD: rig
-          POSTGRES_DB: rig
-        ports:
-          - 55440:5432
-        options: >-
-          --health-cmd pg_isready
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-
-    env:
-      DATABASE_URL: postgres://rig:rig@localhost:55440/rig?sslmode=disable
 
     steps:
       - uses: actions/checkout@v4
