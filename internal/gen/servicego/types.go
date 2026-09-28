@@ -144,11 +144,17 @@ func (e *emitter) paramStruct(b *gobuf.Buf, name, doc string, fields []ir.Field)
 //
 // An update body is the one place a patch appears: leaving a field out and
 // clearing it are different requests, and a pointer cannot say which.
+//
+// A parameter naming a table is naming that table's rows, which is why a
+// resource is resolved here exactly as an object is: both are a declaration in
+// the document with a package it is declared in, and only [emitter.objectRef]
+// knows which package that is.
 func (e *emitter) paramGoType(b *gobuf.Buf, f ir.Field) string {
 	if f.Type == "" {
 		return "any"
 	}
-	if kind, ok := e.doc.TypeKindOf(f.Type); ok && kind == ir.TypeKindObject {
+	if kind, ok := e.doc.TypeKindOf(f.Type); ok &&
+		(kind == ir.TypeKindObject || kind == ir.TypeKindResource) {
 		if f.IsArray() {
 			return "[]" + e.objectRef(b, f.Type)
 		}

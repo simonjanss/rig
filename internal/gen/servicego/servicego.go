@@ -152,15 +152,42 @@ func (e *emitter) object(name string) *ir.Object { return e.doc.Object(name) }
 
 // objectRef is how this package names an object in Go.
 //
-// The filter shapes live in the model, because the repository takes one and the
-// service is what hands it over. Everything else is declared here. Qualifying
-// from the object's origin rather than from a list of names means a shape that
-// moves packages moves in one place.
+// The model declares two kinds: the filter shapes, because the repository takes
+// one and the service is what hands it over, and a resource's entity, because
+// the repository returns one and it is answered as it is stored. Everything
+// else is declared here — Error and Pagination, and the page shape, which is
+// projected from an entity and emitted in this package all the same. Asking
+// what the document says an object is, rather than matching on its name, means
+// a shape that moves packages moves in one place.
 func (e *emitter) objectRef(b *gobuf.Buf, name string) string {
-	if obj := e.object(name); obj != nil && obj.Origin == ir.OriginFilter {
+	if e.modelDeclares(name) {
 		return e.model(b) + "." + name
 	}
 	return name
+}
+
+// modelDeclares reports whether the model package is where an object is
+// declared. A name it has never heard of is not, which is what leaves a
+// hand-written type in the project's own package alone.
+func (e *emitter) modelDeclares(name string) bool {
+	obj := e.object(name)
+	if obj == nil {
+		return false
+	}
+	switch obj.Origin {
+	case ir.OriginFilter:
+		return true
+	case ir.OriginProjected:
+		// A projected object is either a resource's entity or the page that
+		// wraps it, and only the first is the model's — the second is emitted
+		// by listResponseType, in this package. The entity is the one whose
+		// name is a resource's.
+		return e.doc.Resource(name) != nil
+	default:
+		// Builtin and Config: Error and Pagination are declared in baseFile,
+		// and a configured shape belongs to the API surface that declared it.
+		return false
+	}
 }
 
 // goType renders a field's Go type, qualifying whatever the model declares.

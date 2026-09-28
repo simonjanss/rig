@@ -1147,3 +1147,79 @@ func ownerScopedDoc(t *testing.T) *ir.Document {
 	t.Fatalf("no field for %s", owner.Name)
 	return nil
 }
+
+// A hand-written endpoint's body may name another table's rows — a create that
+// arrives with its answers attached is the shape this was found in. That type
+// is the model's, and naming it bare emits a package that does not compile.
+func TestABodyThatNamesAnotherResourceIsTheModels(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", "relations.ir.json"))
+	res := doc.Resource("Fixture")
+	if res == nil {
+		t.Fatal("the relations fixture has no Fixture resource")
+	}
+	res.Endpoints = append(res.Endpoints,
+		ir.Endpoint{
+			Name:   "Report",
+			Method: "POST",
+			Path:   "/{id}/_report",
+			Request: ir.EndpointRequest{
+				ContentTypes: []string{"application/json"},
+				BodyParams: []ir.Field{{
+					Name: "Lineup", Wire: "lineup",
+					Description: "The players who took the field.",
+					Type:        "Player", TypeKind: ir.TypeKindResource,
+					GoType:    "[]Player",
+					Modifiers: []string{ir.ModifierArray},
+				}},
+			},
+			Responses: []ir.EndpointResponse{{StatusCode: 200, BodyObject: "Fixture"}},
+			Impl:      ir.EndpointImpl{Kind: ir.EndpointCustom, ServiceMethod: "Report"},
+		},
+		// The other way to say it: the whole body is one row of another table.
+		ir.Endpoint{
+			Name:   "Sign",
+			Method: "POST",
+			Path:   "/{id}/_sign",
+			Request: ir.EndpointRequest{
+				ContentTypes: []string{"application/json"},
+				BodyObject:   "Player",
+			},
+			Responses: []ir.EndpointResponse{{StatusCode: 200, BodyObject: "Fixture"}},
+			Impl:      ir.EndpointImpl{Kind: ir.EndpointCustom, ServiceMethod: "Sign"},
+		})
+
+	artifacts := gentest.Run(t, servicego.New(), doc, opts())
+	types := find(t, artifacts, "fixture.gen.go")
+
+	body, ok := between(types, "type FixtureReportBody struct {", "\n}")
+	if !ok {
+		t.Fatalf("no FixtureReportBody:\n%s", types)
+	}
+	if !strings.Contains(collapse(body), "Lineup []model.Player") {
+		t.Errorf("another table's rows are the model's type:\n%s", body)
+	}
+
+	// And the page shape is this file's own, so the rule cannot be widened to
+	// every projected object: that would be the same bug pointing the other way.
+	if !strings.Contains(collapse(types), "Data []*model.Fixture") {
+		t.Errorf("the page shape should still be declared here:\n%s", types)
+	}
+
+	service := find(t, artifacts, "fixture_service.gen.go")
+	iface, _ := between(service, "type FixtureEndpoints interface {", "\n}")
+	for _, want := range []string{
+		"Report(ctx context.Context, r Request[struct{}, struct{}, FixtureReportBody]) (*model.Fixture, error)",
+		"Sign(ctx context.Context, r Request[struct{}, struct{}, model.Player]) (*model.Fixture, error)",
+	} {
+		if !strings.Contains(collapse(iface), collapse(want)) {
+			t.Errorf("missing %s:\n%s", want, iface)
+		}
+	}
+
+	// The proof the string assertions stand in for: an api package naming a
+	// type nobody declares is a package that does not build.
+	gentest.MustCompileAll(t, layers(t, doc,
+		gentest.Package{Dir: "api", Artifacts: artifacts})...)
+}
