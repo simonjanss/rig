@@ -39,9 +39,35 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 		if len(ep.Request.QueryParams) > 0 {
 			e.queryStruct(b, res, ep)
 		}
+
+		// The shape a success decodes into, where the configuration spelled its
+		// fields out instead of naming an object that already exists.
+		e.resultStruct(b, res, ep)
 	}
 
 	return e.artifact(fileName(res, "_input"), b)
+}
+
+// resultStruct emits what a successful call decodes into, for an endpoint whose
+// success body the configuration spelled out rather than named.
+//
+// Through the same field renderer as a request body, which is why the tags
+// carry omitempty. It is inert here — this client only ever decodes one of
+// these — and one spelling of a struct field is worth more than a tag that is
+// tidier on a value nothing marshals.
+func (e *emitter) resultStruct(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
+	fields := genutil.InlineResultFields(ep)
+	if len(fields) == 0 {
+		return
+	}
+
+	name := genutil.ResultShapeName(res, ep)
+
+	b.Comment(name + " is what " + res.Name + "." + ep.Name + " answers with.")
+	b.L("type %s struct {", name)
+	e.structFields(b, fields)
+	b.L("}")
+	b.NL()
 }
 
 // createInput emits the body of a create: plain values, because a create has

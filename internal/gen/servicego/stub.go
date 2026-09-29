@@ -280,7 +280,7 @@ func (e *emitter) customStubs(b *gobuf.Buf, res *ir.Resource, api string, ctxPkg
 		}
 		b.L("func (s *rules) %s {", e.methodSignatureQualified(b, res, ep, ctxPkg, api))
 
-		if successBodyObject(ep) == "" {
+		if successBody(res, ep) == "" {
 			b.L("return %s.Internal(nil, \"%s.%s is not implemented yet\")", errPkg, res.Name, ep.Name)
 		} else {
 			b.L("return nil, %s.Internal(nil, \"%s.%s is not implemented yet\")", errPkg, res.Name, ep.Name)
@@ -308,8 +308,8 @@ func (e *emitter) methodSignatureQualified(b *gobuf.Buf, res *ir.Resource, ep *i
 		qualify(e.slotType(b, res, ep, "body")) + "]"
 
 	ret := "error"
-	if obj := successBodyObject(ep); obj != "" {
-		ret = "(*" + qualify(e.objectType(b, res, obj)) + ", error)"
+	if t := e.resultType(b, res, ep); t != "" {
+		ret = "(*" + qualify(t) + ", error)"
 	}
 
 	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg() + ".Context, r " + request + ") " + ret

@@ -437,6 +437,13 @@ endpoints:
 fields) or `body_object` (the name of a whole object) — not both. A response
 takes `body_object` or `body_fields`, likewise not both.
 
+`body_fields` is for the answer that is not any one table's row: several lists
+read side by side, a receipt, a summary. rig names that shape
+`<Resource><Endpoint>Result` — `IssueReportResult` — and declares it everywhere
+the endpoint is described: the service interface returns it, both SDKs decode
+into it, and it is a component in the OpenAPI document under that same name. So
+a response is spelled out in one place and named identically in four.
+
 Each parameter is:
 
 ```yaml

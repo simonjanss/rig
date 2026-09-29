@@ -59,6 +59,66 @@ func BodyShapeName(res *ir.Resource, ep *ir.Endpoint) string {
 	return res.Name + ep.Name + "Body"
 }
 
+// SuccessResponse is the outcome an endpoint answers with when nothing went
+// wrong, and whether it declares one at all.
+//
+// The first 2xx, because an endpoint that lists two is listing one success and
+// one variation of it, and every generator here wants the same one. It is a
+// pointer so that a caller can read the body without copying the headers and
+// content types beside it.
+func SuccessResponse(ep *ir.Endpoint) (*ir.EndpointResponse, bool) {
+	for i := range ep.Responses {
+		if r := &ep.Responses[i]; r.StatusCode >= 200 && r.StatusCode < 300 {
+			return r, true
+		}
+	}
+	return nil, false
+}
+
+// ResultShapeName is what an endpoint's success body is called, for every
+// output that has to name it: the service interface's return type, both SDKs,
+// and the OpenAPI component.
+//
+// Empty when the endpoint answers with nothing. A configuration that named an
+// object gets that name, because the shape already exists and a second name for
+// it would describe a type the SDK does not have.
+//
+// A configuration that spelled the body out instead gets a name rig makes up,
+// the mirror of [BodyShapeName] on the way back. Before this existed those
+// fields reached the OpenAPI document and no further: the specification
+// promised a body that the Go client returned as `error` and the TypeScript one
+// as `Promise<void>`, with no diagnostic anywhere, because every generator but
+// one read BodyObject alone. A response is the half of an endpoint a caller
+// actually reads, and describing it in two places that disagree is worse than
+// not describing it at all.
+func ResultShapeName(res *ir.Resource, ep *ir.Endpoint) string {
+	r, ok := SuccessResponse(ep)
+	if !ok {
+		return ""
+	}
+	if r.BodyObject != "" {
+		return r.BodyObject
+	}
+	if len(r.BodyFields) == 0 {
+		return ""
+	}
+	return res.Name + ep.Name + "Result"
+}
+
+// InlineResultFields are the fields of a success body the configuration spelled
+// out, and nil where it named an object or carries no body.
+//
+// What it separates is who declares the shape. A named object is somewhere in
+// the document already and every generator resolves it; these fields are
+// declared nowhere, so whichever generator names them also has to emit them.
+func InlineResultFields(ep *ir.Endpoint) []ir.Field {
+	r, ok := SuccessResponse(ep)
+	if !ok || r.BodyObject != "" {
+		return nil
+	}
+	return r.BodyFields
+}
+
 // BodyRequired names the fields of a request body a caller cannot leave out.
 //
 // A field is required when the database cannot supply it: not nullable, not an

@@ -287,6 +287,9 @@ func (e *emitter) placements() map[string]string {
 			if len(ep.Request.QueryParams) > 0 {
 				home[genutil.QueryTypeName(res, ep)] = input
 			}
+			if len(genutil.InlineResultFields(ep)) > 0 {
+				home[genutil.ResultShapeName(res, ep)] = input
+			}
 		}
 	}
 
