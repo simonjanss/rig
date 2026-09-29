@@ -317,7 +317,7 @@ func (e *emitter) call(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 		return
 	}
 
-	if successBodyObject(ep) == "" {
+	if successBody(res, ep) == "" {
 		b.L("if err := svc.%s(ctx, req%s); err != nil { fail(s, w, r, rc, err); return }",
 			ep.Impl.ServiceMethod, extra)
 		b.L("w.WriteHeader(%s)", statusExpr(httpPkg, status))
@@ -386,13 +386,11 @@ func statusExpr(httpPkg string, status int) string {
 	return strconv.Itoa(status)
 }
 
-func successBodyObject(ep *ir.Endpoint) string {
-	for _, r := range ep.Responses {
-		if r.StatusCode >= 200 && r.StatusCode < 300 {
-			return r.BodyObject
-		}
-	}
-	return ""
+// successBody names the shape a successful response carries, or empty for a
+// response with no body. The handler never spells the type — it writes whatever
+// the service returned — so all it needs from this is whether there is one.
+func successBody(res *ir.Resource, ep *ir.Endpoint) string {
+	return genutil.ResultShapeName(res, ep)
 }
 
 func endpointDoc(ep *ir.Endpoint) string {

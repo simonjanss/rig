@@ -3,6 +3,7 @@ package servicego
 import (
 	"fmt"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/internal/naming"
 	"github.com/simonjanss/rig/pkg/gen"
@@ -103,11 +104,31 @@ func (e *emitter) returnType(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) st
 		}
 	}
 
-	obj := successBodyObject(ep)
-	if obj == "" {
+	t := e.resultType(b, res, ep)
+	if t == "" {
 		return "error"
 	}
-	return "(*" + e.objectType(b, res, obj) + ", error)"
+	return "(*" + t + ", error)"
+}
+
+// resultType is the Go type a successful call comes back with, or empty for an
+// endpoint that answers with nothing.
+//
+// A body the configuration spelled out is this package's own struct — typesFile
+// emits it — so it is named bare, where a body that named an object is resolved
+// to wherever that object was declared.
+func (e *emitter) resultType(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) string {
+	r, ok := genutil.SuccessResponse(ep)
+	if !ok {
+		return ""
+	}
+	if r.BodyObject != "" {
+		return e.objectType(b, res, r.BodyObject)
+	}
+	if len(r.BodyFields) == 0 {
+		return ""
+	}
+	return genutil.ResultShapeName(res, ep)
 }
 
 // objectType resolves a response body's name to a Go type.
@@ -121,15 +142,11 @@ func (e *emitter) objectType(b *gobuf.Buf, res *ir.Resource, name string) string
 	return e.objectRef(b, name)
 }
 
-// successBodyObject names the object a successful response carries, or empty
-// for a response with no body.
-func successBodyObject(ep *ir.Endpoint) string {
-	for _, r := range ep.Responses {
-		if r.StatusCode >= 200 && r.StatusCode < 300 {
-			return r.BodyObject
-		}
-	}
-	return ""
+// successBody names the shape a successful response carries, or empty for a
+// response with no body — whether the configuration named that shape or spelled
+// its fields out.
+func successBody(res *ir.Resource, ep *ir.Endpoint) string {
+	return genutil.ResultShapeName(res, ep)
 }
 
 func endpointDoc(ep *ir.Endpoint) string {
@@ -656,7 +673,7 @@ func (e *emitter) delegateBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) 
 	errPkg := b.Import(runtimeModule + "/rigerr")
 
 	fail := "return "
-	if successBodyObject(ep) != "" {
+	if successBody(res, ep) != "" {
 		fail = "return nil, "
 	}
 

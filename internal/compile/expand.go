@@ -128,6 +128,37 @@ func Expand(api ir.API, opt ExpandOptions) (ir.API, diag.List) {
 		out.Resources = append(out.Resources, expanded)
 	}
 
+	// An unexposed table's rows, where an endpoint deliberately hands them out.
+	//
+	// `expose: false` withholds the generated surface over a table — no routes,
+	// no wire shape — which is why expandResource returns before projecting one:
+	// nothing should put rig_account_token in an OpenAPI document. But a
+	// hand-written endpoint may name another table's rows in a body, and then
+	// the document does refer to them, and a shape nothing declares is an SDK
+	// that does not compile. That is rig#175 read from the other side: there the
+	// type was named wrongly, here it was never projected at all.
+	//
+	// So the entity is projected on demand, for a resource an endpoint names and
+	// for no other. What stays out of the document is still everything nobody
+	// asked for, and what a caller is handed is still whatever that endpoint
+	// decided to hand them — `expose: false` was never a rule about which rows
+	// may leave, only about which routes exist to ask for them.
+	for _, name := range bodyTypeNames(out.Resources) {
+		if have(name) {
+			continue
+		}
+		res := resourceNamed(out.Resources, name)
+		if res == nil || !res.Unexposed {
+			continue
+		}
+		out.Objects = append(out.Objects, ir.Object{
+			Name:        res.Name,
+			Description: res.Description,
+			Origin:      ir.OriginProjected,
+			Fields:      readableFields(*res),
+		})
+	}
+
 	// The file shape, last, because a projection of the file table beats it.
 	//
 	// It is injected at all so that `files.expose: false` still has something for
@@ -312,6 +343,61 @@ func expandResource(res ir.Resource, n *naming.Namer, opt ExpandOptions, exposed
 }
 
 // readableFields are the fields a client sees when it reads the resource.
+// bodyTypeNames is every type an endpoint names in a body, in either direction,
+// sorted so that two runs over one document agree.
+//
+// Names rather than kinds, because this runs inside Expand and TypeKind is
+// Freeze's to fill in — asking for ir.TypeKindResource here matches nothing,
+// which is a silent nothing rather than an error. The caller decides what each
+// name turned out to be by looking it up.
+//
+// Bodies only. A path or query parameter cannot be a row, and a relation is a
+// filter's business rather than a shape's — so what this finds is exactly the
+// construct somebody wrote out by hand and meant.
+func bodyTypeNames(resources []ir.Resource) []string {
+	seen := map[string]bool{}
+	note := func(fields []ir.Field) {
+		for _, f := range fields {
+			if f.Type != "" {
+				seen[f.Type] = true
+			}
+		}
+	}
+	for i := range resources {
+		for j := range resources[i].Endpoints {
+			ep := &resources[i].Endpoints[j]
+			note(ep.Request.BodyParams)
+			if ep.Request.BodyObject != "" {
+				seen[ep.Request.BodyObject] = true
+			}
+			for _, r := range ep.Responses {
+				note(r.BodyFields)
+				if r.BodyObject != "" {
+					seen[r.BodyObject] = true
+				}
+			}
+		}
+	}
+
+	out := make([]string, 0, len(seen))
+	for name := range seen {
+		out = append(out, name)
+	}
+	slices.Sort(out)
+	return out
+}
+
+// resourceNamed finds one resource by name, or nil where the name is an
+// object's rather than a table's.
+func resourceNamed(resources []ir.Resource, name string) *ir.Resource {
+	for i := range resources {
+		if resources[i].Name == name {
+			return &resources[i]
+		}
+	}
+	return nil
+}
+
 func readableFields(res ir.Resource) []ir.Field {
 	var out []ir.Field
 	for _, f := range res.Fields {

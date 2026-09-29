@@ -196,6 +196,14 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 		if len(ep.Request.QueryParams) > 0 {
 			e.queryType(b, res, ep)
 		}
+
+		// What a success decodes into, where the configuration spelled its
+		// fields out instead of naming an object that already exists. Nobody
+		// else declares it, so the generator that returns it emits it.
+		if fields := genutil.InlineResultFields(ep); len(fields) > 0 {
+			e.objectType(b, genutil.ResultShapeName(res, ep),
+				"What "+ep.OperationID+" answers with.", fields)
+		}
 	}
 
 	return e.close(b)

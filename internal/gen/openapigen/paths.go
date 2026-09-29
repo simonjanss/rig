@@ -156,7 +156,7 @@ func (e *emitter) operation(
 		OperationId: operationID(ep, r, primaryEmitted),
 		Parameters:  e.parameters(ep),
 		RequestBody: e.requestBody(res, ep),
-		Responses:   e.responses(ep),
+		Responses:   e.responses(res, ep),
 	}
 
 	// Only against a scheme this document declares. A project with no auth
@@ -318,7 +318,7 @@ func undescribed(proxy *base.SchemaProxy) *base.SchemaProxy {
 //
 // An endpoint's own Responses win over its Errors: a custom endpoint may
 // describe a 409 in its own words, and the shared one would say less.
-func (e *emitter) responses(ep *ir.Endpoint) *v3.Responses {
+func (e *emitter) responses(res *ir.Resource, ep *ir.Endpoint) *v3.Responses {
 	type entry struct {
 		status int
 		resp   *v3.Response
@@ -328,7 +328,7 @@ func (e *emitter) responses(ep *ir.Endpoint) *v3.Responses {
 
 	for _, r := range ep.Responses {
 		seen[r.StatusCode] = true
-		all = append(all, entry{r.StatusCode, e.response(ep, r)})
+		all = append(all, entry{r.StatusCode, e.response(res, ep, r)})
 	}
 	for _, status := range ep.Errors {
 		if seen[status] {
@@ -354,7 +354,7 @@ func (e *emitter) responses(ep *ir.Endpoint) *v3.Responses {
 }
 
 // response renders one outcome an endpoint declares.
-func (e *emitter) response(ep *ir.Endpoint, r ir.EndpointResponse) *v3.Response {
+func (e *emitter) response(res *ir.Resource, ep *ir.Endpoint, r ir.EndpointResponse) *v3.Response {
 	desc := r.Description
 	if desc == "" {
 		// Every response must carry one, and an empty string is not a
@@ -373,8 +373,13 @@ func (e *emitter) response(ep *ir.Endpoint, r ir.EndpointResponse) *v3.Response 
 					Schema: base.CreateSchemaProxyRef(schemaRef(r.BodyObject)),
 				})
 			case ct == ir.MediaJSON && len(r.BodyFields) > 0:
-				content.Set(ct, &v3.MediaType{Schema: base.CreateSchemaProxy(
-					e.fieldsSchema(r.BodyFields, desc))})
+				// Named rather than inlined, because the SDKs name it: a
+				// document describing this body anonymously while the clients
+				// declare IssueReportResult describes a type the reader cannot
+				// find, which is the argument genutil.BodyShapeName makes about
+				// the other direction.
+				content.Set(ct, &v3.MediaType{Schema: base.CreateSchemaProxyRef(
+					schemaRef(e.resultShape(res, ep, r, desc)))})
 			default:
 				// Opaque bytes. An empty media type is how 3.1 says "whatever
 				// this turns out to be"; a schema would be inventing one.

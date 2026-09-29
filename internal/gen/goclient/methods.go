@@ -117,27 +117,13 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 	params = append(params, "opts ..."+rig+".CallOption")
 
 	sig.params = strings.Join(params, ", ")
-	sig.returns = e.successType(ep)
+	sig.returns = genutil.ResultShapeName(res, ep)
 	sig.results = "error"
 	if sig.returns != "" {
 		sig.results = "(*" + sig.returns + ", error)"
 	}
 	sig.path = e.pathExpr(b, ep)
 	return sig
-}
-
-// successType is what a successful call comes back with, or empty for an
-// endpoint that answers with nothing.
-func (e *emitter) successType(ep *ir.Endpoint) string {
-	for _, r := range ep.Responses {
-		if r.StatusCode < 200 || r.StatusCode > 299 {
-			continue
-		}
-		if r.BodyObject != "" {
-			return r.BodyObject
-		}
-	}
-	return ""
 }
 
 // pathExpr builds the route, substituting the path parameters.

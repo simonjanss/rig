@@ -73,7 +73,17 @@ func (e *emitter) endpointTypes(b *gobuf.Buf, res *ir.Resource) {
 			e.paramStruct(b, bodyTypeName(res, ep), bodyDoc(res, ep), ep.Request.BodyParams)
 			e.bodyError(b, res, ep)
 		}
+
+		// A response whose fields the configuration spelled out rather than
+		// naming. Nobody else declares it, so the generator that returns it is
+		// the generator that has to emit it.
+		e.paramStruct(b, genutil.ResultShapeName(res, ep), resultDoc(res, ep),
+			genutil.InlineResultFields(ep))
 	}
+}
+
+func resultDoc(res *ir.Resource, ep *ir.Endpoint) string {
+	return "The response body for " + res.Name + "." + ep.Name + "."
 }
 
 // bodyError emits the typed failure for a custom endpoint's body.

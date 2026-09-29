@@ -76,7 +76,7 @@ func (e *emitter) guardedCall(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, e
 	b.L("result, err := %s.Run(ctx, s.DB, %s.Request{", idem, idem)
 	e.idempotencyFields(b, res, ep)
 	b.L("}, func(ctx %s.Context) (int, any, error) {", ctxPkg)
-	if successBodyObject(ep) == "" {
+	if successBody(res, ep) == "" {
 		b.L("return %s, nil, svc.%s(ctx, req%s)", status, ep.Impl.ServiceMethod, extra)
 	} else {
 		b.L("out, err := svc.%s(ctx, req%s)", ep.Impl.ServiceMethod, extra)

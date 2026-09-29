@@ -217,19 +217,34 @@ func (e *emitter) encoding(ep *ir.Endpoint) *orderedmap.Map[string, *v3.Encoding
 	return out
 }
 
-// fieldsSchema is an inline shape for a response body the document did not
-// name.
+// resultShape registers the component for a success body whose fields the
+// configuration spelled out rather than naming, and answers with its name.
 //
-// Nothing in the compiled document fills EndpointResponse.BodyFields today. It
-// is handled rather than ignored because the alternative — emitting a response
-// with a content type and no schema — describes a body as opaque when the
-// document knew its shape.
-func (e *emitter) fieldsSchema(fields []ir.Field, desc string) *base.Schema {
+// The name is genutil's, so that the schema in this document and the types in
+// both SDKs are one name a reader can follow between them. Before it existed
+// this shape was inlined here and dropped everywhere else: the specification
+// promised a body the Go client returned as `error` and the TypeScript one as
+// `Promise<void>`, with nothing anywhere saying so.
+//
+// No required list. What the server sends is the server's to decide, and a
+// response is read rather than validated — where a request body's required
+// fields are a promise the caller has to keep.
+func (e *emitter) resultShape(res *ir.Resource, ep *ir.Endpoint, r ir.EndpointResponse, desc string) string {
+	name := genutil.ResultShapeName(res, ep)
+	if _, done := e.extra[name]; done {
+		return name
+	}
+
 	props := orderedmap.New[string, *base.SchemaProxy]()
-	for _, f := range fields {
+	for _, f := range r.BodyFields {
 		props.Set(f.Wire, e.fieldSchema(f))
 	}
-	return &base.Schema{Type: []string{"object"}, Description: desc, Properties: props}
+	e.extra[name] = &base.Schema{
+		Type:        []string{"object"},
+		Description: desc,
+		Properties:  props,
+	}
+	return name
 }
 
 // join puts a local sentence after the document's own words.

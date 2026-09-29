@@ -437,6 +437,21 @@ endpoints:
 fields) or `body_object` (the name of a whole object) — not both. A response
 takes `body_object` or `body_fields`, likewise not both.
 
+`body_fields` is for the answer that is not any one table's row: several lists
+read side by side, a receipt, a summary. rig names that shape
+`<Resource><Endpoint>Result` — `IssueReportResult` — and declares it everywhere
+the endpoint is described: the service interface returns it, both SDKs decode
+into it, and it is a component in the OpenAPI document under that same name. So
+a response is spelled out in one place and named identically in four.
+
+A body in either direction may name **another table's rows**, including a table
+that is `expose: false`. rig projects that table's readable columns on demand,
+so the SDKs and the document declare the shape the endpoint actually hands out.
+It is projected only for a table a body names: `expose: false` still keeps every
+other one out of the document entirely. What it withholds is the generated read
+of every row — no route exists to ask for one — and not which rows an endpoint
+of yours may choose to return.
+
 Each parameter is:
 
 ```yaml

@@ -315,7 +315,7 @@ func (e *emitter) signature(
 
 	sig.path = e.pathExpr(b, ep)
 
-	switch success := e.successType(ep); {
+	switch success := genutil.ResultShapeName(res, ep); {
 	case e.isDownload(ep):
 		// A download answers with whatever the file turned out to be, so the
 		// response is handed over unread rather than decoded.
@@ -352,20 +352,6 @@ func (e *emitter) isDownload(ep *ir.Endpoint) bool {
 		}
 	}
 	return false
-}
-
-// successType is what a successful call comes back with, or empty for an
-// endpoint that answers with nothing.
-func (e *emitter) successType(ep *ir.Endpoint) string {
-	for _, r := range ep.Responses {
-		if r.StatusCode < 200 || r.StatusCode > 299 {
-			continue
-		}
-		if r.BodyObject != "" {
-			return r.BodyObject
-		}
-	}
-	return ""
 }
 
 // methodLiteral is the HTTP method as the request will carry it.
