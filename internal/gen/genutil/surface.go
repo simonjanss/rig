@@ -314,3 +314,40 @@ func UnclaimedObjects(
 	}
 	return out
 }
+
+// MultipartBody reports whether an endpoint's body can arrive as a form.
+//
+// It is the create on a table with a file column, and the endpoint whose
+// configuration declared `file_parts:`. Both take the same shape — the body in
+// a part named `json`, the files in parts of their own — and both hand the
+// service the uploads beside the decoded body, so five generators asking the
+// question have to agree on it.
+//
+// An upload route is not one of them: its body is bytes rather than a form
+// carrying some, and it is answered by a shape of its own before the general
+// one is reached. [ir.Endpoint.File] is what tells them apart, which is why
+// counting the parts is not enough.
+func MultipartBody(ep *ir.Endpoint) bool {
+	return ep.File == nil && len(ep.Request.FileParts) > 0
+}
+
+// FilesShapeName is what the struct holding an endpoint's uploads is called in
+// both SDKs.
+//
+// A create's is <Resource>CreateFiles, which is the name it has had since file
+// columns existed and which callers have written down. Anything else is named
+// after its own endpoint, because a resource may declare more than one.
+func FilesShapeName(res *ir.Resource, ep *ir.Endpoint) string {
+	return res.Name + ep.Name + "Files"
+}
+
+// DeclaredFileParts reports whether the parts were declared by a configuration
+// rather than derived from file columns.
+//
+// The difference is what the SDKs can say about them: a create's part is a
+// column, so its member is named after the column and a required one is a
+// compile error waiting to happen. A declared part has no column, may repeat,
+// and carries a description instead of a role.
+func DeclaredFileParts(ep *ir.Endpoint) bool {
+	return MultipartBody(ep) && ep.Impl.Kind == ir.EndpointCustom
+}

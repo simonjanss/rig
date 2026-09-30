@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
@@ -81,8 +82,9 @@ func (e *emitter) downloadHandler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 	b.L("%s.Serve(w, r, content, svc.Files().InlineTypes())", filehttp)
 }
 
-// multipartCreate emits the create's second body, for a resource with a file
-// column.
+// multipartForm emits the second body an endpoint that carries files accepts:
+// the create on a resource with a file column, and the endpoint whose
+// configuration declared `file_parts:`.
 //
 // The parts are consumed in the order they arrive and each is handed to the file
 // service before the reader moves on, because a part's body is only valid until
@@ -90,8 +92,15 @@ func (e *emitter) downloadHandler(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 // followed by an upload step: there is no point at which every part is in hand.
 //
 // A request with no multipart content type never reaches any of this and takes
-// the JSON path byte for byte.
-func (e *emitter) multipartCreate(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
+// the JSON path byte for byte. hasBody says whether there is a JSON path to take
+// — an endpoint may declare files and no body, and then the form is the whole
+// request and a `json` part is one nobody claimed.
+//
+// The required-part checks sit outside the multipart branch deliberately. A
+// caller that sent JSON to an endpoint with a required file has left it out just
+// as surely as one who sent a form without it, and the same 422 naming the part
+// is the answer to both.
+func (e *emitter) multipartForm(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, hasBody bool) {
 	var (
 		errorsPkg = b.Import("errors")
 		ioPkg     = b.Import("io")
@@ -113,11 +122,13 @@ func (e *emitter) multipartCreate(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 	b.NL()
 	b.L("switch part.Name {")
 
-	b.L("case %s.JSONPart:", filehttp)
-	b.Comment("The same body the JSON form carries, through the same decoder, " +
-		"so an unknown key is refused here exactly as it is there and a 422 " +
-		"comes back with the same field errors.")
-	b.L("if err := decodeReader(part.Body, &body); err != nil { fail(s, w, r, rc, err); return }")
+	if hasBody {
+		b.L("case %s.JSONPart:", filehttp)
+		b.Comment("The same body the JSON form carries, through the same decoder, " +
+			"so an unknown key is refused here exactly as it is there and a 422 " +
+			"comes back with the same field errors.")
+		b.L("if err := decodeReader(part.Body, &body); err != nil { fail(s, w, r, rc, err); return }")
+	}
 
 	for _, part := range ep.Request.FileParts {
 		b.L("case %s:", gobuf.Quote(part.Name))
@@ -139,6 +150,16 @@ func (e *emitter) multipartCreate(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 	b.L("}")
 	b.NL()
 
+	if hasBody {
+		b.L("} else if err := decodeBody(r, &body); err != nil {")
+		b.L("fail(s, w, r, rc, err)")
+		b.L("return")
+		b.L("}")
+	} else {
+		b.L("}")
+	}
+	b.NL()
+
 	// A not-null file column with no part is the whole reason the multipart
 	// create exists, so it fails as a field error rather than as a constraint
 	// violation nobody can read.
@@ -150,13 +171,8 @@ func (e *emitter) multipartCreate(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 		b.L("fail(s, w, r, rc, %s.ErrMissingPart(%s))", filehttp, gobuf.Quote(part.Name))
 		b.L("return")
 		b.L("}")
+		b.NL()
 	}
-
-	b.L("} else if err := decodeBody(r, &body); err != nil {")
-	b.L("fail(s, w, r, rc, err)")
-	b.L("return")
-	b.L("}")
-	b.NL()
 }
 
 // hasPartHelper emits the one predicate the multipart create needs, once per
@@ -174,14 +190,22 @@ func (e *emitter) hasPartHelper(b *gobuf.Buf) {
 	b.NL()
 }
 
-// anyRequiredFilePart reports whether any create has a not-null file column, so
-// the shared predicate and the import it brings are emitted only where they are
-// called.
+// anyRequiredFilePart reports whether any endpoint has a part that has to be
+// present — a not-null file column, or a part a configuration did not mark
+// optional — so the shared predicate and the import it brings are emitted only
+// where they are called.
 func (e *emitter) anyRequiredFilePart() bool {
 	for i := range e.doc.API.Resources {
-		for _, f := range e.doc.API.Resources[i].Files {
-			if f.Required {
-				return true
+		res := &e.doc.API.Resources[i]
+		for j := range res.Endpoints {
+			ep := &res.Endpoints[j]
+			if !genutil.MultipartBody(ep) {
+				continue
+			}
+			for _, p := range ep.Request.FileParts {
+				if p.Required {
+					return true
+				}
 			}
 		}
 	}

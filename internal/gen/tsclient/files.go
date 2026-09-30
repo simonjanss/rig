@@ -3,6 +3,7 @@ package tsclient
 import (
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/tsbuf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -37,14 +38,23 @@ const (
 	variantUpload
 	// variantCreateWithFiles is the create that carries its files with it.
 	variantCreateWithFiles
+	// variantCustomForm is a declared endpoint that carries files: the body in
+	// a `json` part and the uploads beside it. Unlike a create's, it is the
+	// only method the endpoint has, because the endpoint took its parts from a
+	// configuration rather than from columns a JSON call could already fill.
+	variantCustomForm
 )
 
 // variantFor is the method an endpoint gets by default.
 func variantFor(ep *ir.Endpoint) methodVariant {
-	if ep.File != nil && ep.Method == "POST" && len(ep.Request.FileParts) > 0 {
+	switch {
+	case ep.File != nil && ep.Method == "POST" && len(ep.Request.FileParts) > 0:
 		return variantUpload
+	case genutil.DeclaredFileParts(ep):
+		return variantCustomForm
+	default:
+		return variantPlain
 	}
-	return variantPlain
 }
 
 // createWithFiles is the create endpoint that carries its files, or nil for a
@@ -68,6 +78,12 @@ func createFilesTypeName(res *ir.Resource) string { return res.Name + "CreateFil
 // string, so this is a decision about which of them is the source and not about
 // what the output says.
 func filePartMember(p ir.FilePart) string {
+	if p.Role == "" {
+		// A declared part has no column, so its field is already the name the
+		// configuration chose. Trimming an identifier suffix off it would
+		// rename a part somebody spelled out.
+		return lowerFirst(p.Field)
+	}
 	return lowerFirst(strings.TrimSuffix(p.Field, "ID"))
 }
 
@@ -89,8 +105,13 @@ type formPart struct {
 	// bytes to. A client that spells it differently has uploaded a part nobody
 	// claimed.
 	name string
-	// value is the expression holding the upload.
+	// value is the expression holding the upload, or the list of them when
+	// array is set.
 	value string
+	// array says value is a list, spread into one entry per file. It is what a
+	// part that may repeat needs, and never true of a create's: one part there
+	// is one column, and a second copy would be two files for one identifier.
+	array bool
 }
 
 // uploadForm is the body a single-file upload sends.
@@ -140,6 +161,72 @@ func createForm(ep *ir.Endpoint) *formBody {
 	return &formBody{row: "input", parts: parts}
 }
 
+// customForm is the body a declared endpoint sends: its own body in the `json`
+// part, and a part per file it was given.
+//
+// row is "undefined" where the endpoint declared no body at all, which leaves
+// the `json` part out entirely rather than sending an empty object the server
+// would refuse as a part nobody claimed.
+func customForm(ep *ir.Endpoint, body string) *formBody {
+	parts := make([]formPart, 0, len(ep.Request.FileParts))
+	for _, p := range ep.Request.FileParts {
+		parts = append(parts, formPart{
+			name:  p.Name,
+			value: "files." + tsbuf.Key(filePartMember(p)),
+			array: p.Array,
+		})
+	}
+	if body == "" {
+		body = "undefined"
+	}
+	return &formBody{row: body, parts: parts}
+}
+
+// endpointFilesType emits the shape a declared endpoint takes its uploads in.
+func (e *emitter) endpointFilesType(b *tsbuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
+	name := genutil.FilesShapeName(res, ep)
+	upload := b.ImportType(e.cfg.ClientImport, "Upload")
+
+	b.Comment(name + " is the files `" + methodName(ep) + "` carries.\n\n" +
+		"Each member is one part of the form: a required part is a plain " +
+		"member, an optional one is optional, and a part that may repeat is a " +
+		"list. So leaving out a file the endpoint insists on does not compile " +
+		"rather than coming back a 422.")
+	b.L("export type %s = {", name)
+	b.Indent()
+	for _, p := range ep.Request.FileParts {
+		if p.Description != "" {
+			b.Comment(p.Description)
+		}
+		switch {
+		case p.Array:
+			b.L("%s: %s[];", tsbuf.Key(filePartMember(p)), upload)
+		case p.Required:
+			b.L("%s: %s;", tsbuf.Key(filePartMember(p)), upload)
+		default:
+			b.L("%s?: %s;", tsbuf.Key(filePartMember(p)), upload)
+		}
+	}
+	b.Outdent()
+	b.L("};")
+	b.NL()
+}
+
+// declaredFormDoc is what an endpoint carrying declared files says about itself.
+func declaredFormDoc() string {
+	return "The request is a `multipart/form-data` form: the body travels " +
+		"in a part named `" + jsonPartName + "` and each file in a part of its " +
+		"own, through the same validation the JSON body would have had. " +
+		"**This call is never sent twice** — a rig server records no form " +
+		"against an idempotency key, because its body is still arriving when " +
+		"the service is called, so a retry is the caller's decision and only " +
+		"the caller still has the bytes."
+}
+
+// jsonPartName is the part the body travels in. It matches
+// files/filehttp.JSONPart, and the client package's own JSON_PART.
+const jsonPartName = "json"
+
 // formPreamble writes the multipart body a method sends.
 //
 // A local rather than an expression inside the op literal, because a create
@@ -147,16 +234,26 @@ func createForm(ep *ir.Endpoint) *formBody {
 func (e *emitter) formPreamble(b *tsbuf.Buf, form *formBody) {
 	multipart := b.Import(e.cfg.ClientImport, "multipart")
 
-	if len(form.parts) == 1 {
+	if len(form.parts) == 1 && !form.parts[0].array {
 		b.L("const form = %s(%s, [[%s, %s]]);", multipart, form.row,
 			tsbuf.Quote(form.parts[0].name), form.parts[0].value)
 		b.NL()
 		return
 	}
 
+	upload := b.ImportType(e.cfg.ClientImport, "Upload")
+
 	b.L("const form = %s(%s, [", multipart, form.row)
 	b.Indent()
 	for _, p := range form.parts {
+		if p.array {
+			// Spread rather than nested, because `multipart` takes a flat list
+			// of parts and a part that repeats is several of them under one
+			// name — which is exactly what the server's part loop reads.
+			b.L("...%s.map((file): [string, %s] => [%s, file]),",
+				p.value, upload, tsbuf.Quote(p.name))
+			continue
+		}
 		b.L("[%s, %s],", tsbuf.Quote(p.name), p.value)
 	}
 	b.Outdent()

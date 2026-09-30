@@ -3,6 +3,7 @@ package servicego
 import (
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -14,6 +15,27 @@ const filesModule = "github.com/simonjanss/rig/files"
 
 // hasFiles reports whether this resource has any file column.
 func hasFiles(res *ir.Resource) bool { return len(res.Files) > 0 }
+
+// needsFileService reports whether this resource's service has to be built with
+// a *files.Service.
+//
+// Wider than [hasFiles], and the difference is the point: an endpoint whose
+// configuration declared `file_parts:` stores uploads too, and the generated
+// handler reaches them through svc.Files() exactly as a multipart create does.
+// A resource with such an endpoint and no file column of its own would
+// otherwise generate a handler calling a method its own interface does not
+// have.
+func needsFileService(res *ir.Resource) bool {
+	if hasFiles(res) {
+		return true
+	}
+	for i := range res.Endpoints {
+		if genutil.MultipartBody(&res.Endpoints[i]) {
+			return true
+		}
+	}
+	return false
+}
 
 // fileColumnOf is the column an endpoint acts on, as the resource declares it.
 func fileColumnOf(res *ir.Resource, ep *ir.Endpoint) ir.FileColumn {

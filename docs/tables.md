@@ -433,9 +433,9 @@ endpoints:
 | `request` | What the client sends. |
 | `responses` | Every status this endpoint can return. |
 
-`request` takes `path_params`, `query_params`, and either `body` (a list of
-fields) or `body_object` (the name of a whole object) — not both. A response
-takes `body_object` or `body_fields`, likewise not both.
+`request` takes `path_params`, `query_params`, `file_parts`, and either `body` (a
+list of fields) or `body_object` (the name of a whole object) — not both. A
+response takes `body_object` or `body_fields`, likewise not both.
 
 `body_fields` is for the answer that is not any one table's row: several lists
 read side by side, a receipt, a summary. rig names that shape
@@ -462,6 +462,54 @@ Each parameter is:
   array: false
   default: "50"
 ```
+
+`file_parts` is for the request that carries files it does not own — an incident
+report with the photographs attached to it, where the bytes belong to whatever
+your service writes and not to a column on this row:
+
+```yaml
+request:
+  body:
+    - name: Title
+      type: String
+  file_parts:
+    - name: Attachments
+      description: Whatever was dragged onto the form.
+      optional: true
+      array: true      # several files, all under the one part name
+```
+
+Declaring one makes the endpoint accept `multipart/form-data` **as well as**
+JSON: the body travels in a part named `json` and each file in a part of its
+own, through the same decoder — so an unknown key is refused on the form exactly
+as it is on the JSON path. A caller with nothing to attach sends the body it
+always sent.
+
+The service method then receives the uploads beside the decoded body:
+
+```go
+func (r *rules) Submit(ctx context.Context, req api.Request[…], pending []*files.Pending) (…)
+```
+
+What happens to them is yours. rig has stored the bytes and handed you the
+pending records; commit them in your own transaction with `files.Commit` and
+write whatever rows point at them. That is the difference from a file column: a
+column's part is bound to it, and a declared part is bound to nothing.
+
+Both SDKs take the files in a generated shape beside the body —
+`LessonSubmitFiles`, one member per part, a list where `array` is set, optional
+where `optional` is — so leaving out a file the endpoint insists on does not
+compile rather than coming back a 422. And the request is a form in the OpenAPI
+document too, one part per declaration.
+
+Two consequences worth knowing. `413` and `415` join the endpoint's errors,
+because a form is the one body that can be too big or of a type the store
+refuses. And **a form is never retried**: rig records no idempotency key against
+it, because the body is still arriving when your service is called, so a resend
+is the caller's decision — only the caller still has the bytes.
+
+A file part needs `files:` to be configured in `rig.yaml`, which is where the
+store, the byte cap and the sweep live — see [rig-yaml.md](rig-yaml.md).
 
 An endpoint named after a generated one **replaces** it. That is reported as a
 note ([RIG4001](diagnostics.md)) so the shadowing is visible rather than

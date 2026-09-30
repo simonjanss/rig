@@ -194,6 +194,9 @@ func (e *emitter) methodDoc(res *ir.Resource, ep *ir.Endpoint, variant methodVar
 	if variant == variantUpload {
 		doc += "\n\n" + uploadDoc(ep)
 	}
+	if variant == variantCustomForm {
+		doc += "\n\n" + declaredFormDoc()
+	}
 	return doc
 }
 
@@ -272,6 +275,21 @@ func (e *emitter) signature(
 			"input: "+input,
 			"files: "+e.ref(b, createFilesTypeName(res)))
 		sig.form = createForm(ep)
+	case variant == variantCustomForm:
+		// The body is what it always was; the files travel beside it. A caller
+		// with nothing to attach still passes the shape, because which parts
+		// are optional is the document's to say and not the call site's.
+		switch {
+		case ep.Request.BodyObject != "":
+			params = append(params, "input: "+e.ref(b, ep.Request.BodyObject))
+			sig.body = "input"
+		case len(ep.Request.BodyParams) > 0:
+			params = append(params, "input: "+e.ref(b, bodyTypeName(res, ep)))
+			sig.body = "input"
+		}
+		params = append(params, "files: "+e.ref(b, genutil.FilesShapeName(res, ep)))
+		sig.form = customForm(ep, sig.body)
+		sig.body = ""
 	case ep.Name == ir.OpSearch:
 		if filter, ok := genutil.SearchFilterField(ep); ok {
 			params = append(params, "filter: "+e.tsType(b, filter))

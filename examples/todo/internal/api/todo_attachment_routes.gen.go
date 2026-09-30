@@ -134,12 +134,13 @@ func handleCreateTodoAttachment(s Server, svc TodoAttachmentService) http.Handle
 				}
 			}
 
-			if !hasPart(pending, "attachmentFile") {
-				fail(s, w, r, rc, filehttp.ErrMissingPart("attachmentFile"))
-				return
-			}
 		} else if err := decodeBody(r, &body); err != nil {
 			fail(s, w, r, rc, err)
+			return
+		}
+
+		if !hasPart(pending, "attachmentFile") {
+			fail(s, w, r, rc, filehttp.ErrMissingPart("attachmentFile"))
 			return
 		}
 

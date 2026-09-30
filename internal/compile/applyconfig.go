@@ -1223,6 +1223,18 @@ func applyEndpointConfig(loaded *tableconf.Loaded, res *ir.Resource, cfg tableco
 		if len(e.Request.BodyParams) > 0 || e.Request.BodyObject != "" {
 			e.Request.ContentTypes = []string{MediaJSON}
 		}
+
+		parts, partDiags := convertFileParts(loaded, &e, req.FileParts, n, i)
+		diags.Append(partDiags)
+		if len(parts) > 0 {
+			e.Request.FileParts = parts
+			// Beside JSON rather than instead of it, which is the shape a
+			// create with a file column already takes: a caller with no files
+			// sends the body it always sent, and the generated server reads
+			// the same struct out of either.
+			e.Request.ContentTypes = append(e.Request.ContentTypes, MediaMultipart)
+			e.Errors = append(e.Errors, 413, 415)
+		}
 		if len(e.Request.BodyParams) > 0 && e.Request.BodyObject != "" {
 			diags.Add(diag.CodeInvalidEndpoint, loaded.At("endpoints", strconv.Itoa(i), "request"),
 				"endpoint %q declares both body fields and a body object; pick one", ec.Name)
@@ -1274,6 +1286,70 @@ func responseContentTypes(rc tableconf.EndpointResponse) []string {
 	}
 	return []string{MediaJSON}
 }
+
+// convertFileParts turns a declared endpoint's `file_parts:` into the shape the
+// generators read, and refuses the spellings that would produce a request
+// nobody could send.
+//
+// The endpoint has no file column to derive anything from, so Name is the whole
+// of the declaration and Role stays empty — see [ir.FilePart]. What the service
+// does with the uploads is the service's; rig stores the bytes and hands over
+// the pending records.
+func convertFileParts(
+	loaded *tableconf.Loaded, e *ir.Endpoint,
+	parts []tableconf.FilePart, n *naming.Namer, idx int,
+) ([]ir.FilePart, diag.List) {
+	var diags diag.List
+	if len(parts) == 0 {
+		return nil, diags
+	}
+
+	at := func(j int, key string) diag.Anchor {
+		return loaded.At("endpoints", strconv.Itoa(idx), "request", "file_parts", strconv.Itoa(j), key)
+	}
+
+	// A form on a method with no body semantics would be dropped by half the
+	// intermediaries between the caller and the handler, and the generated
+	// server never reads one: a GET's body is not decoded.
+	if e.Method == "GET" || e.Method == "DELETE" {
+		diags.Add(diag.CodeInvalidEndpoint, at(0, "name"),
+			"endpoint %q is a %s and declares file parts; a request that carries files needs a method that has a body",
+			e.Name, e.Method)
+		return nil, diags
+	}
+
+	seen := make(map[string]bool, len(parts))
+	out := make([]ir.FilePart, 0, len(parts))
+	for j, p := range parts {
+		wire := n.JSON(p.Name)
+		switch {
+		case wire == jsonPart:
+			diags.Add(diag.CodeReservedName, at(j, "name"),
+				"%q is reserved: it is the part the body itself travels in", jsonPart)
+			continue
+		case seen[wire]:
+			diags.Add(diag.CodeInvalidEndpoint, at(j, "name"),
+				"endpoint %q already declares a file part named %q", e.Name, wire)
+			continue
+		}
+		seen[wire] = true
+
+		out = append(out, ir.FilePart{
+			Name:        wire,
+			Field:       n.Go(p.Name),
+			Description: p.Description,
+			Required:    !p.Optional,
+			Array:       p.Array,
+		})
+	}
+
+	return out, diags
+}
+
+// jsonPart is the part a multipart request carries its body in. It matches
+// files/filehttp.JSONPart, and is spelled here rather than imported because
+// files is a module of its own and the compiler is not one of its dependants.
+const jsonPart = "json"
 
 func convertParams(params []tableconf.Param, n *naming.Namer) []ir.Field {
 	if len(params) == 0 {

@@ -264,6 +264,27 @@ type EndpointRequest struct {
 	Body        []Param `yaml:"body,omitempty" json:"body,omitempty" jsonschema_description:"Body fields. Mutually exclusive with body_object."`
 	// BodyObject names a whole object as the body instead of listing fields.
 	BodyObject string `yaml:"body_object,omitempty" json:"body_object,omitempty" jsonschema_description:"Name of an object to use as the whole body."`
+	// FileParts are the files the request may carry beside its body.
+	FileParts []FilePart `yaml:"file_parts,omitempty" json:"file_parts,omitempty" jsonschema_description:"Files the request carries, as a multipart form beside the JSON body."`
+}
+
+// FilePart is one file a request carries.
+//
+// Declaring one makes the endpoint accept `multipart/form-data` as well as JSON:
+// the body travels in a part named `json` and each file in a part of its own,
+// and the service method receives the uploads beside the decoded body. It is the
+// same shape a create on a table with a file column already takes, said for an
+// endpoint that has no file column to derive it from — which is why Name is the
+// whole of it and there is no column, role or segment here to name.
+//
+// What the service does with the bytes is the service's. rig stores them and
+// hands over the pending uploads; nothing here says which row they end up on,
+// because an endpoint that needed that would be a create.
+type FilePart struct {
+	Name        string `yaml:"name" json:"name" jsonschema_description:"Part name in PascalCase."`
+	Description string `yaml:"description,omitempty" json:"description,omitempty" jsonschema_description:"What this file is."`
+	Optional    bool   `yaml:"optional,omitempty" json:"optional,omitempty" jsonschema_description:"Whether the part may be omitted."`
+	Array       bool   `yaml:"array,omitempty" json:"array,omitempty" jsonschema_description:"Whether the part may repeat, carrying several files under one name."`
 }
 
 // Param is one request parameter.

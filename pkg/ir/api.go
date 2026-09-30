@@ -1257,17 +1257,32 @@ type FilePart struct {
 	// is what the server binds the bytes to, so a client that spells it
 	// differently has uploaded a part nobody claimed.
 	Name string `json:"name"`
-	// Field is the Go field on the owning row, for example
-	// "ProfileImageFileID". A generator naming a member after the part rather
-	// than after the column would produce a shape that reads nothing like the
-	// row it belongs to.
+	// Field is the Go field the part is named after, for example
+	// "ProfileImageFileID" on a create and "Attachments" on an endpoint that
+	// declared the part itself. A generator naming a member after the part
+	// rather than after the column would produce a shape that reads nothing
+	// like the row it belongs to — which is why a create's part takes its
+	// member name from here and not from [FilePart.Name].
 	Field string `json:"field"`
-	// Role is the <role> from <role>_file_id, for example "profileImage".
+	// Role is the <role> from <role>_file_id, for example "profileImage". Empty
+	// on a part a configuration declared, which has no column to take a role
+	// from: what such a part is for is [FilePart.Description]'s to say.
 	Role string `json:"role"`
-	// Required says the column cannot be null, so the part has to be present.
-	// It is the whole reason a multipart create exists: a not-null file column
-	// is unreachable when the row and its bytes are two requests.
+	// Description is what the part carries, for a part a configuration
+	// declared. Empty on a create's, whose role already says it.
+	Description string `json:"description,omitempty"`
+	// Required says the part has to be present: the column cannot be null, or
+	// the configuration did not mark the part optional. It is the whole reason
+	// a multipart create exists — a not-null file column is unreachable when
+	// the row and its bytes are two requests.
 	Required bool `json:"required,omitempty"`
+	// Array says the part may repeat, carrying several files under one name.
+	//
+	// Never true of a create's, where one part is one column and a second copy
+	// would be two files for one identifier. It is what an endpoint collecting
+	// attachments needs, and it is the difference between an SDK member holding
+	// one upload and one holding a list.
+	Array bool `json:"array,omitempty"`
 }
 
 // The media types rig's own endpoints speak.

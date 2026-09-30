@@ -176,27 +176,63 @@ func (e *emitter) multipartSchema(res *ir.Resource, ep *ir.Endpoint) string {
 	}
 
 	for _, p := range parts {
-		props.Set(p.Name, base.CreateSchemaProxy(&base.Schema{
-			Type: []string{"string"},
-			// The 3.1 spelling for opaque bytes. `format: binary` is 3.0's, and
-			// means nothing to a 2020-12 validator.
+		// The 3.1 spelling for opaque bytes. `format: binary` is 3.0's, and
+		// means nothing to a 2020-12 validator.
+		file := &base.Schema{
+			Type:             []string{"string"},
 			ContentMediaType: ir.MediaOctet,
-			Description:      "The " + p.Role + ", as a file.",
-		}))
+			Description:      partDescription(p),
+		}
+		if p.Array {
+			// A part that may repeat is several parts under one name on the
+			// wire, and an array is how 3.1 says that of a form.
+			props.Set(p.Name, base.CreateSchemaProxy(&base.Schema{
+				Type:        []string{"array"},
+				Items:       &base.DynamicValue[*base.SchemaProxy, bool]{A: base.CreateSchemaProxy(file)},
+				Description: partDescription(p),
+			}))
+		} else {
+			props.Set(p.Name, base.CreateSchemaProxy(file))
+		}
 		if p.Required {
 			required = append(required, p.Name)
 		}
 	}
 
 	e.extra[name] = &base.Schema{
-		Type: []string{"object"},
-		Description: "The same body " + ep.Name + " takes, in a part named `" + jsonPart +
-			"`, plus one part per file column. The row and its bytes are committed " +
-			"together, so a request that fails leaves neither.",
-		Properties: props,
-		Required:   required,
+		Type:        []string{"object"},
+		Description: multipartDescription(ep),
+		Properties:  props,
+		Required:    required,
 	}
 	return name
+}
+
+// multipartDescription says what the form is, which differs by where its parts
+// came from: a create's are its table's file columns and are committed with the
+// row, while a declared endpoint's are whatever its configuration named and are
+// the service's to place.
+func multipartDescription(ep *ir.Endpoint) string {
+	if genutil.DeclaredFileParts(ep) {
+		return "The same body " + ep.Name + " takes, in a part named `" + jsonPart +
+			"`, plus one part per file the endpoint declared. A part that may " +
+			"repeat is sent once per file, under the one name."
+	}
+	return "The same body " + ep.Name + " takes, in a part named `" + jsonPart +
+		"`, plus one part per file column. The row and its bytes are committed " +
+		"together, so a request that fails leaves neither."
+}
+
+// partDescription is what one part carries: a configuration's own words where
+// it gave any, and the column's role where the part came from a file column.
+func partDescription(p ir.FilePart) string {
+	if p.Description != "" {
+		return p.Description
+	}
+	if p.Role == "" {
+		return "The " + p.Name + " part, as a file."
+	}
+	return "The " + p.Role + ", as a file."
 }
 
 // encoding states each part's content type.
