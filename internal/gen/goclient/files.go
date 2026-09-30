@@ -3,6 +3,7 @@ package goclient
 import (
 	"strings"
 
+	"github.com/simonjanss/rig/internal/gen/genutil"
 	"github.com/simonjanss/rig/internal/gen/gobuf"
 	"github.com/simonjanss/rig/pkg/ir"
 )
@@ -188,5 +189,70 @@ func (e *emitter) createWithFilesMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.E
 
 	b.L("return %s.Do[%s](ctx, c.rt, op, opts...)", rig, sig.returns)
 	b.L("}")
+	b.NL()
+}
+
+// endpointFilesType emits the struct a declared endpoint takes its uploads in.
+//
+// One member per part: a slice where the part may repeat, a plain Upload where
+// it is required, and a pointer where it is not — so a part the document says
+// has to be there is a compile error rather than a 422.
+//
+// A struct rather than a variadic list of parts, for the reason the create's is
+// one: the member names say which file is which, and a `...Upload` would decide
+// that by position at a call site nothing checks.
+func (e *emitter) endpointFilesType(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig string) {
+	name := genutil.FilesShapeName(res, ep)
+
+	b.Comment(name + " is the files " + ep.Name + " carries.\n\n" +
+		"Each member is one part of the form. A required part is a plain " +
+		"Upload, an optional one is a pointer, and a repeating one is a slice — " +
+		"so leaving out a file the endpoint insists on does not compile rather " +
+		"than coming back a 422.")
+	b.L("type %s struct {", name)
+	for i, p := range ep.Request.FileParts {
+		if i > 0 {
+			b.NL()
+		}
+		if p.Description != "" {
+			b.Comment(p.Description)
+		}
+		switch {
+		case p.Array:
+			b.L("%s []%s.Upload", p.Field, rig)
+		case p.Required:
+			b.L("%s %s.Upload", p.Field, rig)
+		default:
+			b.L("%s *%s.Upload", p.Field, rig)
+		}
+	}
+	b.L("}")
+	b.NL()
+}
+
+// appendFileParts emits the assembly of the form's file parts.
+//
+// Appended after the op is built rather than named inside the literal, because
+// a repeating part is a loop and an optional one is a branch, and neither fits
+// in a struct field.
+func (e *emitter) appendFileParts(b *gobuf.Buf, ep *ir.Endpoint, rig string) {
+	b.NL()
+	for _, p := range ep.Request.FileParts {
+		switch {
+		case p.Array:
+			b.L("for _, f := range files.%s {", p.Field)
+			b.L("op.Multipart.Files = append(op.Multipart.Files, %s.Part(%s, f))",
+				rig, gobuf.Quote(p.Name))
+			b.L("}")
+		case p.Required:
+			b.L("op.Multipart.Files = append(op.Multipart.Files, %s.Part(%s, files.%s))",
+				rig, gobuf.Quote(p.Name), p.Field)
+		default:
+			b.L("if files.%s != nil {", p.Field)
+			b.L("op.Multipart.Files = append(op.Multipart.Files, %s.Part(%s, *files.%s))",
+				rig, gobuf.Quote(p.Name), p.Field)
+			b.L("}")
+		}
+	}
 	b.NL()
 }

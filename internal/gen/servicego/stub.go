@@ -79,7 +79,7 @@ func (e *emitter) stubFile(res *ir.Resource) (gen.Artifact, error) {
 	// service, so the stub takes one rather than leaving somebody to discover
 	// the panic.
 	param, arg := "", ""
-	if hasFiles(res) {
+	if needsFileService(res) {
 		param = ", files *" + b.Import(filesModule) + ".Service"
 		arg = ", files"
 	}

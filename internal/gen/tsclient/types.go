@@ -176,6 +176,13 @@ func (e *emitter) inputFile(res *ir.Resource) (gen.Artifact, error) {
 	for i := range res.Endpoints {
 		ep := &res.Endpoints[i]
 
+		// Before the body, for the reason the create's files come before the
+		// create input: the uploads are the half of the call a reader does not
+		// expect from the method name.
+		if genutil.DeclaredFileParts(ep) {
+			e.endpointFilesType(b, res, ep)
+		}
+
 		switch {
 		case genutil.ModelInputName(ep) == ir.OpCreate:
 			e.createInput(b, res, ep)

@@ -26,6 +26,12 @@ func (e *emitter) methodFile(res *ir.Resource) (gen.Artifact, error) {
 	}
 
 	for i := range res.Endpoints {
+		if ep := &res.Endpoints[i]; genutil.DeclaredFileParts(ep) {
+			e.endpointFilesType(b, res, ep, rig)
+		}
+	}
+
+	for i := range res.Endpoints {
 		e.method(b, res, &res.Endpoints[i], rig)
 	}
 
@@ -77,6 +83,9 @@ type signature struct {
 	path string
 	// query is the name of the query struct parameter, or empty.
 	query string
+	// files says the method takes uploads, so the body travels as a form
+	// rather than as the request itself.
+	files bool
 }
 
 // signature works out the shape of a method from the endpoint alone.
@@ -108,6 +117,14 @@ func (e *emitter) signature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint, rig
 	case len(ep.Request.BodyParams) > 0:
 		params = append(params, "in "+genutil.BodyShapeName(res, ep))
 		sig.body = "in"
+	}
+
+	if genutil.DeclaredFileParts(ep) {
+		// Beside the body rather than instead of it: the endpoint accepts a
+		// form carrying both, and a caller with nothing to attach passes the
+		// zero value.
+		sig.files = true
+		params = append(params, "files "+genutil.FilesShapeName(res, ep))
 	}
 
 	if len(ep.Request.QueryParams) > 0 {
@@ -217,13 +234,32 @@ func (e *emitter) buildOp(b *gobuf.Buf, ep *ir.Endpoint, sig signature, rig stri
 	if sig.query != "" {
 		b.L("Query: query,")
 	}
-	if sig.body != "" {
+	switch {
+	case sig.files:
+		b.Comment("The body travels as a part named \"json\", and the transport " +
+			"writes it first, because the server reads the parts in order and " +
+			"wants the body before the bytes.")
+		b.L("Multipart: &%s.Multipart{JSON: %s},", rig, jsonOrNil(sig))
+	case sig.body != "":
 		b.L("Body: %s,", sig.body)
 	}
 	if fallback := e.fallbackPath(ep); fallback != "" {
 		b.L("Fallback: %s,", gobuf.Quote(fallback))
 	}
 	b.L("}")
+
+	if sig.files {
+		e.appendFileParts(b, ep, rig)
+	}
+}
+
+// jsonOrNil is the body to put in the `json` part: the request's own, or nil
+// for an endpoint that declared files and no body at all.
+func jsonOrNil(sig signature) string {
+	if sig.body == "" {
+		return "nil"
+	}
+	return sig.body
 }
 
 // methodExpr is the HTTP method, named rather than spelled where net/http has a

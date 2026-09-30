@@ -273,6 +273,9 @@ func (e *emitter) placements() map[string]string {
 		}
 		for i := range res.Endpoints {
 			ep := &res.Endpoints[i]
+			if genutil.DeclaredFileParts(ep) {
+				home[genutil.FilesShapeName(res, ep)] = input
+			}
 			switch {
 			case genutil.ModelInputName(ep) == ir.OpCreate:
 				home[res.Name+"CreateInput"] = input

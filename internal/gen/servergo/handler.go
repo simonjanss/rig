@@ -256,24 +256,28 @@ func (e *emitter) decodeQueryParam(b *gobuf.Buf, f ir.Field) {
 
 // decodeBody reads and validates the request body.
 func (e *emitter) decodeBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
-	if e.bodyTypeOf(b, res, ep) == "" {
+	body := e.bodyTypeOf(b, res, ep)
+
+	// An endpoint carrying files has a second body whether or not it has a
+	// first one: the parts are the request, and a form with no `json` part is
+	// a request for an endpoint that declared files and nothing else.
+	if genutil.MultipartBody(ep) {
+		if body != "" {
+			b.L("var body %s", body)
+		}
+		e.multipartForm(b, res, ep, body != "")
 		return
 	}
 
-	b.L("var body %s", e.bodyTypeOf(b, res, ep))
+	if body == "" {
+		return
+	}
+
+	b.L("var body %s", body)
 	if ep.Method == "GET" || ep.Method == "DELETE" {
 		// A body on a method that has no defined body semantics would be
 		// ignored by half the intermediaries on the way here.
 		b.NL()
-		return
-	}
-
-	// A create on a table with a file column honestly accepts two bodies, and
-	// which one arrived is a question about this request rather than about the
-	// endpoint. The JSON path below is untouched: a request without a multipart
-	// content type never reaches the other branch.
-	if len(ep.Request.FileParts) > 0 && ep.Name == ir.OpCreate {
-		e.multipartCreate(b, res, ep)
 		return
 	}
 
@@ -301,11 +305,11 @@ func (e *emitter) call(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) {
 
 	status := successStatus(ep)
 
-	// A create on a table with a file column carries whatever the form brought
-	// with it. It is nil on the JSON path, which is what makes that path the one
-	// it has always been.
+	// An endpoint that accepts a form carries whatever it brought with it. It
+	// is nil on the JSON path, which is what makes that path the one it has
+	// always been.
 	extra := ""
-	if len(ep.Request.FileParts) > 0 && ep.Name == ir.OpCreate {
+	if genutil.MultipartBody(ep) {
 		extra = ", pending"
 	}
 

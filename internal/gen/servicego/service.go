@@ -42,7 +42,7 @@ func (e *emitter) serviceInterface(b *gobuf.Buf, res *ir.Resource) {
 		b.L("%s", e.methodSignature(b, res, ep, ctxPkg))
 	}
 
-	if hasFiles(res) {
+	if needsFileService(res) {
 		b.NL()
 		b.Comment("Files is where this resource's uploads go.\n\n" +
 			"It is on the interface because the handler needs it too: the parts of " +
@@ -78,11 +78,12 @@ func (e *emitter) methodSignature(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoin
 		e.slotType(b, res, ep, "body") + "]"
 
 	extra := ""
-	if ep.Name == ir.OpCreate && hasFiles(res) {
-		// A create on a table with a file column also arrives as a form, and
-		// what the form carried has to reach the same method: the row and its
-		// files are committed together or the not-null column is unreachable.
-		// It is nil on the JSON path, which is what leaves that path alone.
+	if genutil.MultipartBody(ep) {
+		// An endpoint that accepts a form has to be handed what the form
+		// carried: a create's row and its files are committed together or the
+		// not-null column is unreachable, and a declared endpoint's uploads are
+		// the reason it declared them. It is nil on the JSON path, which is
+		// what leaves that path alone.
 		extra = ", pending []*" + b.Import(filesModule) + ".Pending"
 	}
 
@@ -327,7 +328,7 @@ func (e *emitter) rulesInterface(b *gobuf.Buf, res *ir.Resource) {
 		"the writer back. The service layer never has to hold a half-built value " +
 		"or name the type it is part of.")
 	front := ""
-	if hasFiles(res) {
+	if needsFileService(res) {
 		front = ", files *" + b.Import(filesModule) + ".Service"
 	}
 	b.L("func New%sService(repo %s.%sRepository, rules %s%s) Default%sService {",
@@ -366,7 +367,7 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		"Writer, so the generated operations and the hand-written ones take one " +
 		"path.")
 	b.L("write %sWriter", res.Name)
-	if hasFiles(res) {
+	if needsFileService(res) {
 		b.Comment("files is where this resource's uploads go. It is a parameter " +
 			"of the constructor rather than something to set afterwards, because " +
 			"a table with a file column has endpoints that cannot answer without " +
@@ -389,7 +390,7 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		"at the call site would have said so. An empty " + res.Name +
 		"Contract is still allowed — it is just a thing somebody wrote down.")
 	filesParam, filesArg := "", ""
-	if hasFiles(res) {
+	if needsFileService(res) {
 		filesParam = ", files *" + b.Import(filesModule) + ".Service"
 		filesArg = ", files: files"
 	}
@@ -418,7 +419,7 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 		b.L("}")
 		b.NL()
 	}
-	if hasFiles(res) {
+	if needsFileService(res) {
 		b.Comment("A nil file service is a resource whose upload routes all " +
 			"answer 500. Failing at startup beats finding that out from a caller.")
 		b.L("if files == nil {")
@@ -459,7 +460,7 @@ func (e *emitter) defaultService(b *gobuf.Buf, res *ir.Resource) {
 	e.notifySubject(b, res)
 	e.readHelpers(b, res)
 
-	if hasFiles(res) {
+	if needsFileService(res) {
 		e.fileServiceField(b, res)
 		for _, fc := range res.Files {
 			e.fileURLHelper(b, res, fc)
@@ -635,7 +636,7 @@ func (e *emitter) defaultMethod(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint,
 
 	switch ep.Name {
 	case ir.OpCreate:
-		if hasFiles(res) {
+		if genutil.MultipartBody(ep) {
 			e.createWithFilesBody(b, res)
 			break
 		}
@@ -994,7 +995,7 @@ func (e *emitter) deleteBody(b *gobuf.Buf, res *ir.Resource, store string) {
 
 // frontArg passes the file service through the front door when there is one.
 func frontArg(res *ir.Resource) string {
-	if hasFiles(res) {
+	if needsFileService(res) {
 		return ", files"
 	}
 	return ""
