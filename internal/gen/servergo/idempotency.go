@@ -45,7 +45,10 @@ func (e *emitter) idempotencyFields(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpo
 	idem := b.Import(idempotencyModule)
 
 	b.L("TenantID: claims.TenantID,")
-	b.L("Key: r.Header.Get(\"Idempotency-Key\"),")
+	b.Comment("Read once, off the request context, so that a rule the service " +
+		"layer writes about the key and the record written here cannot " +
+		"disagree about what the caller sent.")
+	b.L("Key: rc.IdempotencyKey,")
 	b.Comment("The route pattern rather than the path, so the same key against " +
 		"the same endpoint is one record however many rows it names. What the " +
 		"path said is in the fingerprint.")

@@ -109,6 +109,14 @@ The record and the write commit together, so there is no moment where one exists
 without the other: a write that failed leaves no record, and its key is free for
 the corrected request that follows.
 
+A write carrying **no** key is not recorded, and is otherwise an ordinary write.
+That is rig's default and not every flow's rule: where every client sends a key,
+a write without one cannot be told apart from a retry of itself, and you may want
+it refused. The key is on the request context for exactly that —
+`r.Context().IdempotencyKey`, empty where the caller named nothing — so the rule
+lives in the service layer beside the rest of that flow's rules rather than in a
+middleware that has to know which routes it applies to.
+
 - **The same key with a different body is a 422**, not a replay. A key names one
   request; answering a different one with a stored response would hand a client a
   success describing something it never asked for. For a multipart write the body

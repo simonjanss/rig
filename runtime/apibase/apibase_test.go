@@ -476,3 +476,29 @@ func TestAnUnidentifiedCallerIsKeyedOnTheAddressOnlyThroughATrustedProxy(t *test
 		})
 	}
 }
+
+// The key the caller named its write with reaches the service layer.
+//
+// rig's own use of it is idempotency.Run's — a write carrying one is recorded
+// and one carrying none is not — and that is the right default rather than
+// every project's rule. A flow whose clients all send a key may want a write
+// without one refused, because it cannot be told apart from a retry of itself;
+// that rule belongs to the flow, and the flow is the service layer, which until
+// this had no way to see what the caller sent.
+func TestTheIdempotencyKeyReachesTheServiceLayer(t *testing.T) {
+	t.Parallel()
+
+	r := httptest.NewRequest(http.MethodPost, "/api/v1/issues/_report", nil)
+	r.Header.Set(apibase.IdempotencyHeader, "one-filing")
+
+	if got := apibase.RequestContextOf(apibase.Server{}, r).IdempotencyKey; got != "one-filing" {
+		t.Errorf("IdempotencyKey = %q, want %q", got, "one-filing")
+	}
+
+	// And a caller that named nothing is not a caller who named the empty
+	// string by accident: the distinction is what a rule about it reads.
+	bare := httptest.NewRequest(http.MethodPost, "/api/v1/issues/_report", nil)
+	if got := apibase.RequestContextOf(apibase.Server{}, bare).IdempotencyKey; got != "" {
+		t.Errorf("IdempotencyKey = %q, want empty", got)
+	}
+}

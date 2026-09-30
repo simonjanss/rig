@@ -151,6 +151,19 @@ type RequestContext struct {
 	// than with this.
 	ClientRevision string
 
+	// IdempotencyKey is what the caller asked to have remembered, and empty
+	// where they asked for nothing.
+	//
+	// It is here because the service layer is where a rule about it can live.
+	// rig's own use of the key is [github.com/simonjanss/rig/runtime/idempotency.Run]'s
+	// — a write carrying one is recorded, and one carrying none is simply not
+	// — which is the right default and is not every project's rule. A flow
+	// whose clients all send a key may want a write without one refused, on
+	// the grounds that it cannot be told apart from a retry of itself; that is
+	// a sentence in that flow's specification rather than in this package, and
+	// it needs the key where the rule is written.
+	IdempotencyKey string
+
 	// ServerRevision is what this server was generated from, so that
 	// [RequestContext.Stale] has both sides of the comparison in hand.
 	//
@@ -542,6 +555,15 @@ func Prepare(s Server, w http.ResponseWriter, r *http.Request) (context.Context,
 	return Resolve(s, w, r, true)
 }
 
+// IdempotencyHeader is the header a client names a write with, so that sending
+// it twice is remembered as one.
+//
+// Spelled here as well as in the generated handler because this package reads
+// it and that one writes it, and a project's own rule about it — see
+// [RequestContext.IdempotencyKey] — reads it through this constant rather than
+// through a literal of its own.
+const IdempotencyHeader = "Idempotency-Key"
+
 // RequestContextOf is what one request looks like to an error body and to a log
 // line.
 //
@@ -563,6 +585,7 @@ func RequestContextOf(s Server, r *http.Request) RequestContext {
 		UserAgent:      r.UserAgent(),
 		ClientRevision: r.Header.Get(s.revisionHeader()),
 		ServerRevision: s.Revision,
+		IdempotencyKey: r.Header.Get(IdempotencyHeader),
 	}
 	// The first answer: the hook when there is one, and otherwise the caller's
 	// own, so a client correlating its side with this one is believed.
