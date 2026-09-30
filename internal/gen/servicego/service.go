@@ -678,10 +678,19 @@ func (e *emitter) delegateBody(b *gobuf.Buf, res *ir.Resource, ep *ir.Endpoint) 
 		fail = "return nil, "
 	}
 
+	// Whatever the form carried travels with the request, because the
+	// implementation is what places it. Forwarding without it would not
+	// compile, which is the only reason this is a correctness problem rather
+	// than a silent one.
+	extra := ""
+	if genutil.MultipartBody(ep) {
+		extra = ", pending"
+	}
+
 	b.L("if s.contract.Endpoints == nil {")
 	b.L("%s%s.Internal(nil, \"%s.%s has no implementation\")", fail, errPkg, res.Name, ep.Name)
 	b.L("}")
-	b.L("return s.contract.Endpoints.%s(ctx, r)", ep.Impl.ServiceMethod)
+	b.L("return s.contract.Endpoints.%s(ctx, r%s)", ep.Impl.ServiceMethod, extra)
 }
 
 // createBody hands the request body straight to the repository.

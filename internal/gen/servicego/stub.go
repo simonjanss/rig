@@ -312,7 +312,15 @@ func (e *emitter) methodSignatureQualified(b *gobuf.Buf, res *ir.Resource, ep *i
 		ret = "(*" + qualify(t) + ", error)"
 	}
 
-	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg() + ".Context, r " + request + ") " + ret
+	// The same extra parameter the interface declares. A stub scaffolded
+	// without it is a stub that does not satisfy the interface it was written
+	// to satisfy.
+	extra := ""
+	if genutil.MultipartBody(ep) {
+		extra = ", pending []*" + b.Import(filesModule) + ".Pending"
+	}
+
+	return ep.Impl.ServiceMethod + "(ctx " + ctxPkg() + ".Context, r " + request + extra + ") " + ret
 }
 
 // expand fills the layout placeholders in a stub directory template.

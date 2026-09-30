@@ -7,6 +7,7 @@ import (
 
 	"github.com/simonjanss/rig/internal/gen/gentest"
 	"github.com/simonjanss/rig/internal/gen/servicego"
+	"github.com/simonjanss/rig/pkg/gen"
 	"github.com/simonjanss/rig/pkg/ir"
 )
 
@@ -32,11 +33,17 @@ func TestADeclaredEndpointsUploadsReachTheServiceLayer(t *testing.T) {
 	res.Endpoints = append(res.Endpoints, submitEndpoint())
 	doc.Reindex()
 
-	api := collapse(find(t, gentest.Run(t, servicego.New(), doc, opts()), "lesson_service.gen.go"))
+	artifacts := gentest.Run(t, servicego.New(), doc, stubOpts())
+	api := collapse(find(t, artifacts, "lesson_service.gen.go"))
 
 	for _, want := range []string{
 		// The interface, so nothing can implement it and quietly drop the files.
 		"Submit(ctx context.Context, r Request[struct{}, struct{}, LessonSubmitBody], pending []*files.Pending)",
+		// And the forwarder to the implementation, which is the one place the
+		// parameter can be declared and then not passed. It does not compile
+		// when it is missing, which is the only reason this was ever found —
+		// so it is asserted here rather than left to the next project.
+		"return s.contract.Endpoints.Submit(ctx, r, pending)",
 		// And the way to the store, which is how the handler gets there.
 		"Files() *files.Service",
 		"func NewLessonService(repo store.LessonRepository, rules LessonRules, files *files.Service)",
@@ -45,6 +52,23 @@ func TestADeclaredEndpointsUploadsReachTheServiceLayer(t *testing.T) {
 			t.Errorf("the API layer should contain %q", want)
 		}
 	}
+
+	// The scaffolded service layer has to satisfy the interface above, and its
+	// signature is written by a second function that had the same hole.
+	stub := collapse(find(t, artifacts, "lesson.go"))
+	want := "func (s *rules) Submit(ctx context.Context, r api.Request[struct{}, struct{}, api.LessonSubmitBody], pending []*files.Pending)"
+	if !strings.Contains(stub, want) {
+		t.Errorf("the scaffolded service layer should contain %q:\n%s", want, stub)
+	}
+}
+
+// stubOpts asks for the scaffolded service layer as well, which the ordinary
+// options leave out.
+func stubOpts() gen.Options {
+	o := opts()
+	o.Raw["api_import"] = "rigtest/api"
+	o.Raw["stub_dir"] = "services/{table}"
+	return o
 }
 
 // submitEndpoint is what `file_parts:` on a declared endpoint compiles to: a
