@@ -106,7 +106,10 @@ func handleCreateNotificationDevice(s Server, svc NotificationDeviceService) htt
 
 		result, err := idempotency.Run(ctx, s.DB, idempotency.Request{
 			TenantID: claims.TenantID,
-			Key:      r.Header.Get("Idempotency-Key"),
+			// Read once, off the request context, so that a rule the service layer writes
+			// about the key and the record written here cannot disagree about what the
+			// caller sent.
+			Key: rc.IdempotencyKey,
 			// The route pattern rather than the path, so the same key against the same
 			// endpoint is one record however many rows it names. What the path said is in
 			// the fingerprint.
