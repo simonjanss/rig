@@ -38,5 +38,5 @@ github.com/aws/smithy-go v1.28.1 h1:R/nXH00c8qcfCzQVELtRw+eLQWtzv+VAIEFJ1/xxXlQ=
 github.com/aws/smithy-go v1.28.1/go.mod h1:YE2RhdIuDbA5E5bTdciG9KrW3+TiEONeUWCqxX9i1Fc=
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/simonjanss/rig/files v0.6.3 h1:URdj7k+eyJIHjkoTBwDHSzRrycttXh5DoEI2MJqEFpA=
-github.com/simonjanss/rig/files v0.6.3/go.mod h1:JWjxBAquFeAISqF1u/RyFrRuC0Sxck314DyXMQYfaeg=
+github.com/simonjanss/rig/files v0.6.4 h1:FLx9A9bOL/OQ32fv3xWVfTTRGiACAg+JAH1Bb0d2SBI=
+github.com/simonjanss/rig/files v0.6.4/go.mod h1:SkujEpgOMH7CCga1s+KiDtdwrTKP6MepbXyIr6FW6ic=
