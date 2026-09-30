@@ -5,7 +5,7 @@ go 1.26.6
 require (
 	github.com/google/uuid v1.6.0
 	github.com/jackc/pgx/v5 v5.10.0
-	github.com/simonjanss/rig/runtime v0.6.3
+	github.com/simonjanss/rig/runtime v0.6.4
 )
 
 require (
