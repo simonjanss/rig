@@ -37,7 +37,7 @@ func (e *emitter) electricFile(streams []*ir.Resource) (gen.Artifact, error) {
 	for _, res := range streams {
 		// A table with no API surface has no types file, so its row type is
 		// emitted here — beside the only thing that mentions it.
-		if _, exposed := e.home[res.Name]; !exposed {
+		if !e.hasTypesFile(res) {
 			e.rowType(b, res)
 		}
 

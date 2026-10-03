@@ -3,6 +3,7 @@ package tsclient_test
 import (
 	"flag"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"testing"
 
@@ -334,6 +335,65 @@ func TestAnUnexposedStreamedRowDeclaresItsEnums(t *testing.T) {
 	fileOf(t, artifacts, "lesson_status.gen.ts")
 }
 
+// An unexposed streamed table whose name is also an object some other endpoint
+// sends. The object goes to objects.gen, which declares no row types, so the
+// row still belongs beside its factory — and asking where the name lives said
+// objects.gen, so electric.gen imported a RigNotificationRecipientRow that
+// nothing exported. Found in a project whose report endpoint answered with two
+// such tables.
+func TestAStreamedRowStaysWithItsFactoryWhenItsNameIsAnObject(t *testing.T) {
+	t.Parallel()
+
+	doc := gentest.LoadDocument(t, filepath.Join("testdata", notifyFixture))
+	streamed := doc.Resource("RigNotificationRecipient")
+	if streamed == nil || !streamed.Unexposed || streamed.Electric == nil {
+		t.Fatal("the notify fixture should stream an unexposed RigNotificationRecipient")
+	}
+	doc.API.Objects = append(doc.API.Objects, ir.Object{
+		Name: streamed.Name,
+		Fields: []ir.Field{{
+			Name: "ID", Wire: "id",
+			Type: ir.TypeUUID, TypeKind: ir.TypeKindPrimitive, GoType: "uuid.UUID",
+		}},
+	})
+	posts := doc.Resource("BlogPost")
+	posts.Endpoints = append(posts.Endpoints, ir.Endpoint{
+		Name:        "Report",
+		Method:      "GET",
+		Path:        "/_report",
+		Pattern:     "GET /api/v1/blog-posts/_report",
+		OperationID: "reportBlogPost",
+		Responses: []ir.EndpointResponse{{
+			StatusCode:   200,
+			Description:  "Who has been told.",
+			ContentTypes: []string{ir.MediaJSON},
+			BodyFields: []ir.Field{{
+				Name: "Recipients", Wire: "recipients",
+				Type: streamed.Name, TypeKind: ir.TypeKindObject,
+				GoType:    "[]model." + streamed.Name,
+				Modifiers: []string{ir.ModifierArray},
+			}},
+		}},
+		Impl: ir.EndpointImpl{
+			Kind:          ir.EndpointCustom,
+			ServiceMethod: "Report",
+			HandlerName:   "ReportBlogPost",
+		},
+	})
+	doc.Reindex()
+	artifacts := gentest.Run(t, tsclient.New(), doc, opts())
+
+	if !strings.Contains(fileOf(t, artifacts, "objects.gen.ts"),
+		"export type RigNotificationRecipient = {") {
+		t.Fatal("the object should be declared in objects.gen, or this tests nothing")
+	}
+	src := fileOf(t, artifacts, "electric.gen.ts")
+	if !strings.Contains(src, "export type RigNotificationRecipientRow = {") {
+		t.Errorf("the row should be declared beside its factory:\n%s", src)
+	}
+	assertImportsResolve(t, artifacts)
+}
+
 // A factory's second parameter is bound whether or not the body reads it, so
 // that `createCollectionCache` keeps inferring the params type from that
 // position. Where nothing reads it the name is underscored, because rig writes
@@ -403,6 +463,37 @@ func fileOf(t *testing.T, artifacts []gen.Artifact, path string) string {
 	}
 	t.Fatalf("no %s among the emitted files", path)
 	return ""
+}
+
+var (
+	siblingImport = regexp.MustCompile(`import (?:type )?\{([^}]*)\} from "\./([^"]+)\.js";`)
+	declaration   = regexp.MustCompile(`(?m)^export (?:type|const|function|interface) (\w+)`)
+)
+
+// assertImportsResolve fails for every name one emitted file imports from a
+// sibling that the sibling does not export — what tsc reports as TS2305, and
+// what a golden cannot see when the import and the missing declaration are both
+// what the generator meant to write.
+func assertImportsResolve(t *testing.T, artifacts []gen.Artifact) {
+	t.Helper()
+	exports := map[string]map[string]bool{}
+	for _, a := range artifacts {
+		names := map[string]bool{}
+		for _, m := range declaration.FindAllStringSubmatch(string(a.Content), -1) {
+			names[m[1]] = true
+		}
+		exports[a.Path] = names
+	}
+	for _, a := range artifacts {
+		for _, m := range siblingImport.FindAllStringSubmatch(string(a.Content), -1) {
+			target := m[2] + ".ts"
+			for _, name := range strings.Split(m[1], ",") {
+				if name = strings.TrimSpace(name); name != "" && !exports[target][name] {
+					t.Errorf("%s imports %s from %s, which does not export it", a.Path, name, target)
+				}
+			}
+		}
+	}
 }
 
 func between(src, open, close string) (string, bool) {

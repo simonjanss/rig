@@ -136,7 +136,7 @@ func (g *Generator) Generate(
 
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
-		if res.Unexposed || len(res.Endpoints) == 0 {
+		if !e.hasTypesFile(res) {
 			continue
 		}
 
@@ -304,7 +304,7 @@ func (e *emitter) placements() map[string]string {
 	// with no API surface at all — with the stream factories that are the only
 	// thing that mentions it.
 	for _, res := range e.streamed() {
-		if _, exposed := home[res.Name]; exposed {
+		if e.hasTypesFile(res) {
 			home[res.Name+"Row"] = home[res.Name]
 			continue
 		}
@@ -313,6 +313,20 @@ func (e *emitter) placements() map[string]string {
 
 	return home
 }
+
+// hasTypesFile reports whether a resource gets a `<resource>.gen.ts` of its own
+// — the file its entity, its page and, when it streams, its row type are
+// declared in.
+//
+// It is asked of the resource, never of [emitter.home], because a name having a
+// home is not the same thing. An unexposed table can share its name with an
+// object some other endpoint sends, and that object is declared in objects.gen,
+// which declares no row types. Reading the map answered "exposed" for such a
+// table: the row was placed in objects.gen, skipped beside the factory, and
+// written nowhere, so electric.gen imported a name nothing exported. Where the
+// types file is emitted, where the row is placed and where it is written all
+// ask this, so the three cannot come apart again.
+func (e *emitter) hasTypesFile(res *ir.Resource) bool { return genutil.IsExposed(res) }
 
 // moduleFor is the specifier a sibling module is imported by.
 //

@@ -253,13 +253,16 @@ func Exposed(doc *ir.Document) []*ir.Resource {
 	var out []*ir.Resource
 	for i := range doc.API.Resources {
 		res := &doc.API.Resources[i]
-		if res.Unexposed || len(res.Endpoints) == 0 {
-			continue
+		if IsExposed(res) {
+			out = append(out, res)
 		}
-		out = append(out, res)
 	}
 	return out
 }
+
+// IsExposed is [Exposed]'s question asked of one resource, for a caller that
+// already holds it and has to give the same answer.
+func IsExposed(res *ir.Resource) bool { return !res.Unexposed && len(res.Endpoints) > 0 }
 
 // FilterObjects are the search shapes belonging to a resource.
 //
