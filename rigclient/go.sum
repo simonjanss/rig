@@ -1,4 +1,4 @@
 github.com/google/uuid v1.6.0 h1:NIvaJDMOsjHA8n1jAhLSgzrAzy1Hgr+hNrb57e+94F0=
 github.com/google/uuid v1.6.0/go.mod h1:TIyPZe4MgqvfeYDBFedMoGGpEw/LqOeaOT+nhxU+yHo=
-github.com/simonjanss/rig/runtime v0.6.5 h1:38QsQaCuqmhnAID/8FN1WUmPkvSJqiFoBbelegUG3lA=
-github.com/simonjanss/rig/runtime v0.6.5/go.mod h1:pIwMlLv4x4i9xgg0LqfCTFfC9XyEjq8oa/skb3dPFXQ=
+github.com/simonjanss/rig/runtime v0.6.6 h1:PDHGefS+RAv7fMGc5ZmiQqO49KuX4XxJDIsVeahuEXI=
+github.com/simonjanss/rig/runtime v0.6.6/go.mod h1:pIwMlLv4x4i9xgg0LqfCTFfC9XyEjq8oa/skb3dPFXQ=
