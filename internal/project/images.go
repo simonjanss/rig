@@ -9,15 +9,15 @@ import "os"
 // on every machine. These exist for the case that file cannot express — an image
 // whose *address* differs by who is pulling it.
 //
-// The case that forced them is a private registry. An image mirrored into a
-// company's own ECR is reached at
-// <account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>, and the account is not
-// a fact about the project: it is a fact about the deployment doing the pulling.
-// Committing one into rig.yaml puts a second organisation's account in a file
-// every laptop reads, and leaves a fork of the project pointing at a registry it
+// The case that forced them is a private registry. A mirror lives at a name
+// carrying the account that holds it, whatever the registry is — ECR, GHCR,
+// Artifactory, a host inside somebody's network — and that account is not a fact
+// about the project: it is a fact about the deployment doing the pulling.
+// Committing one into rig.yaml puts one organisation's registry in a file every
+// laptop and every fork reads, and leaves everybody else pointing at a host they
 // cannot reach. It also stops being hypothetical the day an upstream image goes
-// behind a login, which is what `electricsql/electric` did — every tag of it,
-// not one.
+// behind a login, which is what `electricsql/electric` — the image rig pins by
+// default, hence rig's problem — did to every tag at once.
 //
 // So the variable wins over the file. That is the opposite of how rig treats
 // everything else, and the reason is that this is the one setting whose correct
