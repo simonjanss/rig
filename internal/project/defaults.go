@@ -322,7 +322,15 @@ func (p *Project) applyDefaults() {
 	if c.Database.Port == 0 {
 		c.Database.Port = DefaultPort
 	}
+	// The environment first, then the file, then rig's own pin. See images.go
+	// for why this one setting reads that way round.
+	if env := imageFromEnv(ImageEnv); env != "" {
+		c.Database.Image = env
+	}
 	if c.Database.Electric.Enabled {
+		if env := imageFromEnv(ElectricImageEnv); env != "" {
+			c.Database.Electric.Image = env
+		}
 		setDefault(&c.Database.Electric.Image, DefaultElectricImage)
 		if c.Database.Electric.ContainerName == "" {
 			name := c.Project.Name

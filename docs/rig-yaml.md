@@ -350,6 +350,37 @@ database:
 | `container_name` | `{project.name}-electric` | |
 | `port` | `55433` | Host port the sync service answers shapes on. The `electric` generator's `electric_url` option should agree with it. |
 
+### Pulling from your own registry
+
+Both images can be named by the environment instead of by this file, and the
+environment wins:
+
+| | |
+|---|---|
+| `RIG_DB_IMAGE` | overrides `database.image` |
+| `RIG_ELECTRIC_IMAGE` | overrides `database.electric.image` |
+
+This is the one setting rig reads that way round, and the reason is that an
+image's *address* can be a fact about whoever is pulling it rather than about the
+project. A mirror in a private registry is reached at
+`<account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>`: writing one into
+rig.yaml puts somebody's account number in a file every laptop and every fork
+reads, and points a fork at a registry it cannot reach. A continuous integration
+job that has just authenticated to its own mirror knows something this file
+cannot be told once and for all.
+
+```yaml
+# .github/workflows/ci.yml
+- uses: aws-actions/amazon-ecr-login@v2
+  id: ecr
+- run: rig db up
+  env:
+    RIG_ELECTRIC_IMAGE: ${{ steps.ecr.outputs.registry }}/acme/electric:1.7.12
+```
+
+An empty value is read as unset, so a lookup that silently produced nothing falls
+back to rig's pin rather than starting a container with no name.
+
 Enabling it also adds `wal_level=logical` to `settings` when nothing lists one —
 logical replication is how the sync service follows changes, and it cannot be
 turned on after the server has started. A container started without it is
