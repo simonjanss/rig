@@ -9,13 +9,12 @@ import (
 // An image whose address is a fact about the puller rather than about the
 // project.
 //
-// A mirror in a private registry is reached at a name carrying somebody's
-// account — <account>.dkr.ecr.<region>.amazonaws.com/… — and committing one into
-// rig.yaml puts that account in a file every laptop and every fork reads. The
-// case stopped being hypothetical when `electricsql/electric` went behind a
-// login: every tag of it, so no version in rig.yaml could be pulled anonymously
-// and a continuous integration job that had just authenticated to its own mirror
-// had no way to say so.
+// A mirror in a private registry is reached at a name carrying the account that
+// holds it, and committing one into rig.yaml puts that account in a file every
+// laptop and every fork reads. The case stopped being hypothetical when
+// `electricsql/electric` went behind a login: every tag of it, so no version in
+// rig.yaml could be pulled anonymously and a continuous integration job that had
+// just authenticated to its own mirror had no way to say so.
 //
 // Hence the one setting rig reads from the environment in preference to the
 // file. Both halves are asserted here, because an override that could not be
@@ -23,8 +22,8 @@ import (
 // to keep it everywhere the variable is unset.
 func TestAnImageMayComeFromTheEnvironment(t *testing.T) {
 	const (
-		mirror   = "111122223333.dkr.ecr.eu-north-1.amazonaws.com/procss/electric:1.7.12"
-		postgres = "111122223333.dkr.ecr.eu-north-1.amazonaws.com/procss/postgres:17-alpine"
+		mirror   = "registry.example.test/mirrors/electric:1.6.9"
+		postgres = "registry.example.test/mirrors/postgres:17-alpine"
 	)
 
 	t.Run("the environment wins over the file", func(t *testing.T) {

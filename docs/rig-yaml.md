@@ -362,12 +362,12 @@ environment wins:
 
 This is the one setting rig reads that way round, and the reason is that an
 image's *address* can be a fact about whoever is pulling it rather than about the
-project. A mirror in a private registry is reached at
-`<account>.dkr.ecr.<region>.amazonaws.com/<repo>:<tag>`: writing one into
-rig.yaml puts somebody's account number in a file every laptop and every fork
-reads, and points a fork at a registry it cannot reach. A continuous integration
-job that has just authenticated to its own mirror knows something this file
-cannot be told once and for all.
+project. A mirror in a private registry — ECR, GHCR, Artifactory, a host inside
+your own network — is reached at a name carrying the account that holds it:
+writing one into rig.yaml puts that account in a file every laptop and every fork
+reads, and points everybody else at a registry they cannot reach. A continuous
+integration job that has just authenticated to its own mirror knows something
+this file cannot be told once and for all.
 
 ```yaml
 # .github/workflows/ci.yml
